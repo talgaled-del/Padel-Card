@@ -4,3 +4,13 @@ services:
     runtime: static
     buildCommand: "true"
     staticPublishPath: ./
+    headers:
+      - path: /
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache, no-store, must-revalidate
+      - path: /*
+        name: Cache-Control
+        value: no-cache, must-revalidate

@@ -474,3 +474,34 @@ body.mode-showcase.has-dock #card-root { padding-bottom: 118px; }
 .ut-card .ut-video-tile {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
+
+
+/* Owner-only prompt to replace a legacy low-res / data-URL photo */
+.photo-quality-prompt {
+  margin: 14px 16px 0;
+  padding: 14px 16px 16px;
+  border-radius: 18px;
+  background: rgba(200, 255, 60, 0.1);
+  border: 1px solid rgba(200, 255, 60, 0.3);
+  display: grid;
+  gap: 10px;
+}
+.photo-quality-prompt.hidden { display: none; }
+.photo-quality-prompt p {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.45;
+  color: #f4ffe8;
+}
+.photo-quality-prompt input[type="file"] { display: none; }
+.photo-quality-prompt .btn { width: 100%; text-align: center; margin: 0; }
+.photo-quality-prompt .upload-progress { margin-top: 2px; }
+
+.ut-card > .photo-quality-prompt {
+  margin: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+}

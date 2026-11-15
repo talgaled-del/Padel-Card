@@ -9,7 +9,13 @@
     maxVideos: 3,
     maxBytes: 100 * 1024 * 1024,
     maxDuration: 180,
-    maxPhotoBytes: 12 * 1024 * 1024
+    maxPhotoBytes: 40 * 1024 * 1024
+  };
+
+  const PHOTO_UPLOAD = {
+    maxEdge: 2000,
+    quality: 0.9,
+    timeoutMs: 90000
   };
 
   const PHOTO_DISPLAY = {
@@ -850,6 +856,7 @@
       xhr.upload.onprogress = function (ev) {
         if (ev.lengthComputable && onProgress) onProgress(ev.loaded / ev.total);
       };
+      xhr.timeout = opts.timeout || PHOTO_UPLOAD.timeoutMs;
       xhr.onload = function () {
         var json = null;
         try { json = JSON.parse(xhr.responseText); } catch (err) { reject(new Error("parse")); return; }
@@ -857,6 +864,7 @@
         else reject(new Error((json && json.error && json.error.message) || "upload"));
       };
       xhr.onerror = function () { reject(new Error("network")); };
+      xhr.ontimeout = function () { reject(new Error("timeout")); };
       xhr.send(fd);
     });
   }
@@ -957,7 +965,28 @@
   function isPhotoFile(file) {
     if (!file) return false;
     if (file.type && file.type.indexOf("image/") === 0) return true;
-    return /\.(jpe?g|png|webp|gif|heic|heif|avif)$/i.test(file.name || "");
+    if (file.type && file.type !== "application/octet-stream" && file.type !== "") return false;
+    return !file.name || /\.(jpe?g|png|webp|gif|heic|heif|avif)$/i.test(file.name);
+  }
+
+  function isDataUrlPhoto(photo) {
+    return typeof photo === "string" && photo.indexOf("data:") === 0;
+  }
+
+  function isLowResLoadedImage(img) {
+    if (!img || !img.naturalWidth) return false;
+    return img.naturalWidth < 600 || img.naturalHeight < 600;
+  }
+
+  function needsPhotoReupload(photo, img) {
+    if (!photo) return false;
+    if (isDataUrlPhoto(photo)) return true;
+    return isLowResLoadedImage(img);
+  }
+
+  function viewedCardPhoto(card) {
+    if (!card) return "";
+    return card.photo || (card.profile && card.profile.photo) || "";
   }
 
   function sourceSize(src) {
@@ -986,11 +1015,24 @@
   function loadImageElement(file, resolve, reject) {
     var img = new Image();
     var objectUrl = URL.createObjectURL(file);
+    var done = false;
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true;
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("load"));
+    }, 15000);
     img.onload = function () {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
       URL.revokeObjectURL(objectUrl);
       resolve({ kind: "image", src: img });
     };
     img.onerror = function () {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
       URL.revokeObjectURL(objectUrl);
       reject(new Error("load"));
     };
@@ -1043,49 +1085,145 @@
     return out;
   }
 
-  function canvasToJpeg(canvas, maxChars) {
-    var qualities = [0.86, 0.78, 0.7, 0.6];
-    var data = canvas.toDataURL("image/jpeg", qualities[0]);
-    var i;
-    for (i = 1; i < qualities.length && data.length > maxChars; i++) {
-      data = canvas.toDataURL("image/jpeg", qualities[i]);
-    }
-    if (data.length > maxChars && (canvas.width > 800 || canvas.height > 740)) {
-      var smaller = document.createElement("canvas");
-      smaller.width = Math.round(canvas.width * 0.75);
-      smaller.height = Math.round(canvas.height * 0.75);
-      var sctx = smaller.getContext("2d");
-      sctx.imageSmoothingEnabled = true;
-      if (sctx.imageSmoothingQuality) sctx.imageSmoothingQuality = "high";
-      sctx.drawImage(canvas, 0, 0, smaller.width, smaller.height);
-      return canvasToJpeg(smaller, maxChars);
-    }
-    return data;
+  function fitWithin(srcW, srcH, maxEdge) {
+    var edge = Math.max(srcW, srcH);
+    if (edge <= maxEdge) return { w: srcW, h: srcH };
+    var scale = maxEdge / edge;
+    return {
+      w: Math.max(1, Math.round(srcW * scale)),
+      h: Math.max(1, Math.round(srcH * scale))
+    };
   }
 
-  function compressPhoto(file) {
+  function dataUrlToBlob(data) {
+    var parts = String(data).split(",");
+    var mime = (parts[0].match(/:(.*?);/) || [])[1] || "image/jpeg";
+    var bin = atob(parts[1] || "");
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  function asJpegFile(blob) {
+    try {
+      return new File([blob], "padel-photo.jpg", { type: "image/jpeg", lastModified: Date.now() });
+    } catch (err) {
+      try { blob.name = "padel-photo.jpg"; } catch (e) {}
+      return blob;
+    }
+  }
+
+  function canvasToJpegBlob(canvas, quality) {
+    return new Promise(function (resolve, reject) {
+      if (canvas.toBlob) {
+        canvas.toBlob(function (blob) {
+          if (blob && blob.size) resolve(blob);
+          else reject(new Error("toBlob"));
+        }, "image/jpeg", quality);
+        return;
+      }
+      try {
+        resolve(dataUrlToBlob(canvas.toDataURL("image/jpeg", quality)));
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  function preparePhotoForUpload(file) {
     return loadImageFile(file).then(function (loaded) {
       var src = loaded.src;
       var size = sourceSize(src);
       if (!size.w || !size.h) throw new Error("size");
-      var dest = PHOTO_DISPLAY.hero;
-      var crop = coverCrop(size.w, size.h, dest.w, dest.h);
-      var canvas = drawHighQuality(src, crop.sx, crop.sy, crop.sw, crop.sh, dest.w, dest.h);
+      var dest = fitWithin(size.w, size.h, PHOTO_UPLOAD.maxEdge);
+      var canvas = drawHighQuality(src, 0, 0, size.w, size.h, dest.w, dest.h);
       if (src.close) try { src.close(); } catch (err) {}
-      // Keep a high-res copy for the owner's device. Share links only embed short
-      // data URLs or remote (Cloudinary) URLs, so this can be larger than PHOTO_SHARE_MAX.
-      return canvasToJpeg(canvas, 900000);
+      return canvasToJpegBlob(canvas, PHOTO_UPLOAD.quality);
+    }).then(function (blob) {
+      return asJpegFile(blob);
+    });
+  }
+
+  function photoErrorMessage(err) {
+    var msg = (err && err.message) || "";
+    if (msg === "load" || msg === "size" || msg === "toBlob") {
+      return "לא ניתן לקרוא את התמונה. בחרו תמונה בפורמט JPEG או PNG ונסו שוב";
+    }
+    if (msg === "timeout") return "העלאת התמונה ארכה יותר מדי. נסו שוב";
+    if (msg === "network") return "העלאת התמונה נכשלה. בדקו את החיבור ונסו שוב";
+    return "העלאת התמונה נכשלה. נסו שוב";
+  }
+
+  var pendingPreparedPhoto = null;
+
+  function setPhotoRetryVisible(show) {
+    ["photo-retry", "card-photo-retry"].forEach(function (id) {
+      var el = $(id);
+      if (el) el.classList.toggle("hidden", !show);
     });
   }
 
   function setPhotoUploadProgress(show, ratio, label) {
-    var wrap = $("photo-upload-progress");
-    var bar = $("photo-upload-progress-bar");
-    var text = $("photo-upload-progress-label");
-    if (!wrap) return;
-    wrap.classList.toggle("hidden", !show);
-    if (bar) bar.style.width = Math.round((ratio || 0) * 100) + "%";
-    if (text) text.textContent = label || "מעלה את התמונה…";
+    var targets = [
+      { wrap: "photo-upload-progress", bar: "photo-upload-progress-bar", text: "photo-upload-progress-label" }
+    ];
+    if (state.view === "card") {
+      targets.push({
+        wrap: "card-photo-upload-progress",
+        bar: "card-photo-upload-progress-bar",
+        text: "card-photo-upload-progress-label"
+      });
+    }
+    targets.forEach(function (t) {
+      var wrap = $(t.wrap);
+      var bar = $(t.bar);
+      var text = $(t.text);
+      if (!wrap) return;
+      wrap.classList.toggle("hidden", !show);
+      if (bar) bar.style.width = Math.round((ratio || 0) * 100) + "%";
+      if (text) text.textContent = label || "מעלה תמונה…";
+    });
+  }
+
+  function applyUploadedPhoto(url) {
+    state.photo = url;
+    if (state.publicCard && viewerOwnsCard(state.publicCard)) {
+      state.publicCard.photo = url;
+      if (state.publicCard.profile) state.publicCard.profile.photo = url;
+    }
+    if (state.profile) persist();
+    renderPhotoPreview();
+    if (state.view === "card") renderCard();
+  }
+
+  function uploadPreparedPhoto(prepared) {
+    setPhotoRetryVisible(false);
+    setPhotoUploadProgress(true, 0, "מעלה תמונה… 0%");
+    showToast("מעלה תמונה…");
+    return uploadToCloudinary(prepared, function (ratio) {
+      setPhotoUploadProgress(true, ratio, "מעלה תמונה… " + Math.round(ratio * 100) + "%");
+    }, { resourceType: "image", preset: CLOUDINARY.photoPreset, timeout: PHOTO_UPLOAD.timeoutMs }).then(function (res) {
+      pendingPreparedPhoto = null;
+      applyUploadedPhoto(res.secure_url);
+      setPhotoUploadProgress(true, 1, "התמונה נשמרה בכרטיס");
+      showToast("התמונה נוספה");
+      setTimeout(function () { setPhotoUploadProgress(false, 0); }, 1200);
+    }, function (err) {
+      console.warn("photo upload failed", err);
+      setPhotoUploadProgress(false, 0);
+      setPhotoRetryVisible(true);
+      showToast(photoErrorMessage(err));
+      return Promise.reject(err);
+    });
+  }
+
+  function retryPhotoUpload() {
+    if (!pendingPreparedPhoto) {
+      showToast("בחרו תמונה מחדש");
+      setPhotoRetryVisible(false);
+      return;
+    }
+    uploadPreparedPhoto(pendingPreparedPhoto).catch(function () {});
   }
 
   function onPhotoSelected(file) {
@@ -1094,33 +1232,53 @@
       return;
     }
     if (file.size > CLOUDINARY.maxPhotoBytes) {
-      showToast("התמונה גדולה מדי. הגודל המרבי הוא 12MB");
+      showToast("התמונה גדולה מדי. בחרו תמונה קטנה יותר");
       return;
     }
-    setPhotoUploadProgress(true, 0, "מעלה את התמונה… 0%");
-    showToast("מעלה את התמונה…");
-    uploadToCloudinary(file, function (ratio) {
-      setPhotoUploadProgress(true, ratio, "מעלה את התמונה… " + Math.round(ratio * 100) + "%");
-    }, { resourceType: "image", preset: CLOUDINARY.photoPreset }).then(function (res) {
-      state.photo = res.secure_url;
-      renderPhotoPreview();
-      setPhotoUploadProgress(true, 1, "התמונה נשמרה בכרטיס");
-      showToast("התמונה נוספה");
-      setTimeout(function () { setPhotoUploadProgress(false, 0); }, 1200);
+    pendingPreparedPhoto = null;
+    setPhotoRetryVisible(false);
+    if (state.view === "card") {
+      var box = $("photo-quality-prompt");
+      if (box) box.classList.remove("hidden");
+    }
+    setPhotoUploadProgress(true, 0, "מכין את התמונה…");
+    showToast("מכין את התמונה…");
+    preparePhotoForUpload(file).then(function (prepared) {
+      pendingPreparedPhoto = prepared;
+      return uploadPreparedPhoto(prepared).catch(function () {});
     }, function (err) {
-      console.warn("photo upload failed", err);
-      compressPhoto(file).then(function (data) {
-        state.photo = data;
-        renderPhotoPreview();
-        setPhotoUploadProgress(false, 0);
-        showToast(canEmbedPhotoInLink(data)
-          ? "התמונה נוספה"
-          : "התמונה נשמרה בכרטיס, אבל בקישור יוצגו ראשי תיבות");
-      }).catch(function () {
-        setPhotoUploadProgress(false, 0);
-        showToast("לא ניתן לקרוא את התמונה");
-      });
+      console.warn("photo prepare failed", err);
+      pendingPreparedPhoto = null;
+      setPhotoUploadProgress(false, 0);
+      setPhotoRetryVisible(false);
+      showToast(photoErrorMessage(err));
     });
+  }
+
+  function photoQualityPromptHtml() {
+    return '<div class="photo-quality-prompt" id="photo-quality-prompt">' +
+      "<p>התמונה ישנה ובאיכות נמוכה — העלה מחדש לתמונה חדה</p>" +
+      '<label class="btn btn-primary" id="card-photo-upload-label">' +
+        '<input id="card-photo-file" type="file" accept="image/*,.heic,.heif,image/jpeg,image/png,image/webp" />' +
+        "העלאת תמונה" +
+      "</label>" +
+      '<button class="btn btn-ghost' + (pendingPreparedPhoto ? "" : " hidden") + '" id="card-photo-retry" type="button">נסו שוב</button>' +
+      '<div class="upload-progress hidden" id="card-photo-upload-progress" aria-live="polite">' +
+        '<div class="upload-progress-track"><div class="upload-progress-bar" id="card-photo-upload-progress-bar"></div></div>' +
+        '<span id="card-photo-upload-progress-label">מעלה תמונה…</span>' +
+      "</div>" +
+    "</div>";
+  }
+
+  function ensurePhotoQualityPrompt(art, photo) {
+    if (!art || art.querySelector("#photo-quality-prompt")) return;
+    if (!needsPhotoReupload(photo, art.querySelector(".ut-hero-img"))) return;
+    var wrap = document.createElement("div");
+    wrap.innerHTML = photoQualityPromptHtml();
+    var node = wrap.firstElementChild;
+    var body = art.querySelector(".ut-body");
+    if (body) art.insertBefore(node, body);
+    else art.appendChild(node);
   }
 
   function saveProfile(ev) {
@@ -1253,21 +1411,23 @@
           '<div class="' + badgeClass(level.id) + '"><b>' + escapeHtml(level.id) + "</b><span>" + escapeHtml(level.title) + "</span></div>" +
         "</div>" +
       "</div>" +
+      (opts.allowReupload && needsPhotoReupload(photo) ? photoQualityPromptHtml() : "") +
       '<div class="ut-body">' +
         ratingLine +
         '<div class="ut-stats">' + stats.join("") + "</div>" +
         shotsHtml + courts + partnerHtml + vidHtml +
       "</div>";
-    bindHeroPhoto(art);
+    bindHeroPhoto(art, photo, opts.allowReupload);
     return art;
   }
 
-  function bindHeroPhoto(art) {
+  function bindHeroPhoto(art, photo, allowReupload) {
     var img = art.querySelector(".ut-hero-img");
     var hero = art.querySelector(".ut-hero");
     if (!img || !hero) return;
     var mark = function () {
       if (img.naturalWidth) hero.classList.add("is-ready");
+      if (allowReupload) ensurePhotoQualityPrompt(art, photo);
     };
     var fail = function () { hero.classList.remove("has-photo", "is-ready"); };
     if (img.complete) {
@@ -1339,7 +1499,7 @@
     $("open-pair").classList.toggle("hidden", !local || !partner);
     var root = $("card-root");
     root.innerHTML = "";
-    root.appendChild(createPremiumCard(data, { compact: false, partner: partner }));
+    root.appendChild(createPremiumCard(data, { compact: false, partner: partner, allowReupload: owns }));
   }
 
   function renderPairColumn(card) {
@@ -1414,6 +1574,7 @@
   }
 
   function urlToCopyForCard() {
+    if (state.profile && state.levelId && viewerOwnsViewedCard()) return singleShareUrl();
     if (state.publicCard) return currentPageUrl();
     return singleShareUrl();
   }
@@ -1629,9 +1790,25 @@
       ev.target.value = "";
       if (file) onPhotoSelected(file);
     });
+    document.addEventListener("change", function (ev) {
+      if (!ev.target || ev.target.id !== "card-photo-file") return;
+      var file = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (file) onPhotoSelected(file);
+    });
+    $("photo-retry").addEventListener("click", retryPhotoUpload);
+    document.addEventListener("click", function (ev) {
+      if (ev.target && ev.target.closest && ev.target.closest("#card-photo-retry")) {
+        ev.preventDefault();
+        retryPhotoUpload();
+      }
+    });
     $("photo-remove").addEventListener("click", function () {
       state.photo = null;
+      pendingPreparedPhoto = null;
+      setPhotoRetryVisible(false);
       renderPhotoPreview();
+      if (state.profile) persist();
     });
     document.querySelectorAll('input[name="hasPartner"]').forEach(function (el) {
       el.addEventListener("change", function () {

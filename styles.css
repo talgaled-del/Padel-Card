@@ -704,6 +704,8 @@ input[type="url"],
 .photo-preview.has-photo #photo-fallback { display: none; }
 .photo-actions .upload.compact { padding: 12px; text-align: right; }
 .photo-actions .note { margin-top: 8px; }
+.photo-actions #photo-retry { display: inline-block; margin-top: 6px; }
+.photo-actions #photo-retry.hidden { display: none; }
 
 .partner-results { display: grid; gap: 8px; margin-top: 8px; }
 .player-hit, .partner-chip {
