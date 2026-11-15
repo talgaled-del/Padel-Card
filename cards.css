@@ -56,7 +56,10 @@ body.mode-showcase .logo-mark {
   object-fit: cover;
   object-position: center 18%;
   display: block;
+  image-rendering: auto;
+  -webkit-backface-visibility: hidden;
 }
+.ut-hero-img.is-cloud { object-position: center center; }
 .ut-hero-fallback {
   position: absolute;
   inset: 0;
@@ -67,7 +70,9 @@ body.mode-showcase .logo-mark {
   color: rgba(200, 255, 60, 0.35);
   background: linear-gradient(160deg, #1a3a30, #0a1512);
 }
-.ut-hero.has-photo .ut-hero-fallback { display: none; }
+.ut-hero-img { opacity: 0; }
+.ut-hero.has-photo.is-ready .ut-hero-fallback { display: none; }
+.ut-hero.is-ready .ut-hero-img { opacity: 1; }
 .ut-hero-shade {
   position: absolute;
   inset: 0;

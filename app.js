@@ -5,9 +5,18 @@
   const CLOUDINARY = {
     cloudName: "jgreas8e",
     uploadPreset: "padel_card_videos",
+    photoPreset: "padel_card_photos",
     maxVideos: 3,
     maxBytes: 100 * 1024 * 1024,
-    maxDuration: 180
+    maxDuration: 180,
+    maxPhotoBytes: 12 * 1024 * 1024
+  };
+
+  const PHOTO_DISPLAY = {
+    hero: { w: 1290, h: 1200 },
+    heroCompact: { w: 1194, h: 780 },
+    preview: { w: 384, h: 384 },
+    thumb: { w: 192, h: 192 }
   };
 
   const state = {
@@ -131,6 +140,55 @@
     return /res\.cloudinary\.com\/[^/]+\/video\/upload\//.test(url || "");
   }
 
+  function isCloudinaryImage(url) {
+    return /res\.cloudinary\.com\/[^/]+\/image\/upload\//.test(url || "");
+  }
+
+  function isRemotePhoto(photo) {
+    return /^https?:\/\//i.test(photo || "");
+  }
+
+  function canEmbedPhotoInLink(photo) {
+    if (!photo) return false;
+    if (isRemotePhoto(photo)) return true;
+    return photo.length <= PHOTO_SHARE_MAX;
+  }
+
+  function stripCloudinaryImageTransforms(url) {
+    var marker = "/image/upload/";
+    var i = (url || "").indexOf(marker);
+    if (i < 0) return url;
+    var rest = url.slice(i + marker.length);
+    var parts = rest.split("/");
+    if (parts[0] && /(?:^|,)(?:f_|q_|c_|g_|w_|h_|dpr_|so_|e_|fl_)/.test(parts[0])) {
+      rest = parts.slice(1).join("/");
+    }
+    return url.slice(0, i + marker.length) + rest;
+  }
+
+  function cloudinaryImageUrl(url, kind) {
+    if (!isCloudinaryImage(url)) return url;
+    var size = PHOTO_DISPLAY[kind] || PHOTO_DISPLAY.hero;
+    var t = "f_auto,q_auto,c_fill,g_face,w_" + size.w + ",h_" + size.h;
+    var base = stripCloudinaryImageTransforms(url);
+    var marker = "/image/upload/";
+    var i = base.indexOf(marker);
+    return base.slice(0, i + marker.length) + t + "/" + base.slice(i + marker.length);
+  }
+
+  function photoSrc(photo, kind) {
+    if (!photo) return "";
+    if (isCloudinaryImage(photo)) return cloudinaryImageUrl(photo, kind || "hero");
+    return photo;
+  }
+
+  function photoImgTag(photo, kind, className, alt) {
+    var src = photoSrc(photo, kind);
+    if (!src) return "";
+    var cls = (className || "") + (isCloudinaryImage(photo) ? " is-cloud" : "");
+    return '<img class="' + cls.trim() + '" alt="' + escapeHtml(alt || "") + '" src="' + escapeHtml(src) + '">';
+  }
+
   function posterFromCloudinary(url) {
     if (!isCloudinaryVideo(url)) return "";
     return url.replace("/video/upload/", "/video/upload/so_auto/").replace(/\.[a-z0-9]+(?=\?|$)/i, ".jpg");
@@ -189,7 +247,7 @@
       }).filter(Boolean)
     };
     var photo = p.photo || src.photo || null;
-    if (includePhoto && photo && photo.length <= PHOTO_SHARE_MAX) data.ph = photo;
+    if (includePhoto && canEmbedPhotoInLink(photo)) data.ph = photo;
     data.hp = p.hasPartner || "no";
     var partner = null;
     if (p.partnerId) partner = PadelDB.findById(p.partnerId);
@@ -492,7 +550,7 @@
   function setAvatar(elAvatar, elImg, elInitials, name, photo) {
     elInitials.textContent = initials(name);
     if (photo) {
-      elImg.src = photo;
+      elImg.src = photoSrc(photo, "thumb");
       elImg.alt = name || "";
       elImg.classList.remove("hidden");
       elAvatar.classList.add("has-photo");
@@ -596,7 +654,7 @@
     var img = $("photo-img");
     var box = $("photo-preview");
     if (state.photo) {
-      img.src = state.photo;
+      img.src = photoSrc(state.photo, "preview");
       img.classList.remove("hidden");
       box.classList.add("has-photo");
       $("photo-remove").classList.remove("hidden");
@@ -639,7 +697,7 @@
   function partnerChipHtml(p, withClear) {
     var level = PadelQuiz.levelById(p.levelId);
     var photo = p.photo
-      ? '<span class="chip-photo"><img src="' + p.photo + '" alt=""></span>'
+      ? '<span class="chip-photo">' + photoImgTag(p.photo, "thumb", "", p.name) + "</span>"
       : '<span class="chip-photo">' + initials(p.name) + "</span>";
     var clear = withClear ? '<button type="button" class="text-btn" data-clear-partner>הסרה</button>' : "";
     return photo +
@@ -675,7 +733,7 @@
       btn.className = "player-hit" + (p.id === state.partnerId ? " selected" : "");
       var level = PadelQuiz.levelById(p.levelId);
       var photo = p.photo
-        ? '<span class="hit-photo"><img src="' + p.photo + '" alt=""></span>'
+        ? '<span class="hit-photo">' + photoImgTag(p.photo, "thumb", "", p.name) + "</span>"
         : '<span class="hit-photo">' + initials(p.name) + "</span>";
       btn.innerHTML = photo +
         '<span class="hit-info"><strong>' + escapeHtml(p.name) + "</strong><span>" +
@@ -779,13 +837,16 @@
     });
   }
 
-  function uploadToCloudinary(file, onProgress) {
+  function uploadToCloudinary(file, onProgress, opts) {
+    opts = opts || {};
+    var resource = opts.resourceType || "video";
+    var preset = opts.preset || CLOUDINARY.uploadPreset;
     return new Promise(function (resolve, reject) {
       var fd = new FormData();
       fd.append("file", file);
-      fd.append("upload_preset", CLOUDINARY.uploadPreset);
+      fd.append("upload_preset", preset);
       var xhr = new XMLHttpRequest();
-      xhr.open("POST", "https://api.cloudinary.com/v1_1/" + CLOUDINARY.cloudName + "/video/upload");
+      xhr.open("POST", "https://api.cloudinary.com/v1_1/" + CLOUDINARY.cloudName + "/" + resource + "/upload");
       xhr.upload.onprogress = function (ev) {
         if (ev.lengthComputable && onProgress) onProgress(ev.loaded / ev.total);
       };
@@ -893,47 +954,172 @@
     renderVideoList("video-list", state.videos, true);
   }
 
-  function compressPhoto(file) {
+  function isPhotoFile(file) {
+    if (!file) return false;
+    if (file.type && file.type.indexOf("image/") === 0) return true;
+    return /\.(jpe?g|png|webp|gif|heic|heif|avif)$/i.test(file.name || "");
+  }
+
+  function sourceSize(src) {
+    return {
+      w: src.naturalWidth || src.width || 0,
+      h: src.naturalHeight || src.height || 0
+    };
+  }
+
+  function loadImageFile(file) {
     return new Promise(function (resolve, reject) {
-      if (!file || !file.type.startsWith("image/")) {
-        reject(new Error("not-image"));
-        return;
-      }
-      var img = new Image();
-      var objectUrl = URL.createObjectURL(file);
-      img.onload = function () {
-        var side = Math.min(img.width, img.height) || 1;
-        var sx = (img.width - side) / 2;
-        var sy = (img.height - side) / 2;
-        var canvas = document.createElement("canvas");
-        var max = 220;
-        canvas.width = max;
-        canvas.height = max;
-        var ctx = canvas.getContext("2d");
-        ctx.drawImage(img, sx, sy, side, side, 0, 0, max, max);
-        URL.revokeObjectURL(objectUrl);
-        var qualities = [0.62, 0.5, 0.4, 0.3];
-        var data = canvas.toDataURL("image/jpeg", qualities[0]);
-        for (var i = 1; i < qualities.length && data.length > PHOTO_SHARE_MAX; i++) {
-          data = canvas.toDataURL("image/jpeg", qualities[i]);
+      var finishBitmap = function (bmp) { resolve({ kind: "bitmap", src: bmp }); };
+      if (window.createImageBitmap) {
+        var opts = {};
+        try { opts.imageOrientation = "from-image"; } catch (err) {}
+        var attempt = createImageBitmap(file, opts);
+        if (attempt && attempt.then) {
+          attempt.then(finishBitmap, function () { loadImageElement(file, resolve, reject); });
+          return;
         }
-        resolve(data);
-      };
-      img.onerror = function () {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error("load"));
-      };
-      img.src = objectUrl;
+      }
+      loadImageElement(file, resolve, reject);
     });
   }
 
+  function loadImageElement(file, resolve, reject) {
+    var img = new Image();
+    var objectUrl = URL.createObjectURL(file);
+    img.onload = function () {
+      URL.revokeObjectURL(objectUrl);
+      resolve({ kind: "image", src: img });
+    };
+    img.onerror = function () {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("load"));
+    };
+    img.src = objectUrl;
+  }
+
+  function coverCrop(srcW, srcH, destW, destH) {
+    var ratio = destW / destH;
+    var sw, sh, sx, sy;
+    if ((srcW / srcH) > ratio) {
+      sh = srcH;
+      sw = srcH * ratio;
+      sx = (srcW - sw) / 2;
+      sy = 0;
+    } else {
+      sw = srcW;
+      sh = srcW / ratio;
+      sx = 0;
+      sy = Math.max(0, (srcH - sh) * 0.18);
+    }
+    return { sx: sx, sy: sy, sw: sw, sh: sh };
+  }
+
+  function drawHighQuality(src, sx, sy, sw, sh, destW, destH) {
+    var from = src;
+    var fromSx = sx, fromSy = sy, inW = sw, inH = sh;
+    var tmpPrev = null;
+    while (inW / 2 >= destW * 1.5 && inH / 2 >= destH * 1.5) {
+      var mid = document.createElement("canvas");
+      mid.width = Math.max(1, Math.round(inW / 2));
+      mid.height = Math.max(1, Math.round(inH / 2));
+      var mctx = mid.getContext("2d");
+      mctx.imageSmoothingEnabled = true;
+      if (mctx.imageSmoothingQuality) mctx.imageSmoothingQuality = "high";
+      mctx.drawImage(from, fromSx, fromSy, inW, inH, 0, 0, mid.width, mid.height);
+      from = mid;
+      fromSx = 0;
+      fromSy = 0;
+      inW = mid.width;
+      inH = mid.height;
+      tmpPrev = mid;
+    }
+    var out = document.createElement("canvas");
+    out.width = destW;
+    out.height = destH;
+    var ctx = out.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(from, fromSx, fromSy, inW, inH, 0, 0, destW, destH);
+    return out;
+  }
+
+  function canvasToJpeg(canvas, maxChars) {
+    var qualities = [0.86, 0.78, 0.7, 0.6];
+    var data = canvas.toDataURL("image/jpeg", qualities[0]);
+    var i;
+    for (i = 1; i < qualities.length && data.length > maxChars; i++) {
+      data = canvas.toDataURL("image/jpeg", qualities[i]);
+    }
+    if (data.length > maxChars && (canvas.width > 800 || canvas.height > 740)) {
+      var smaller = document.createElement("canvas");
+      smaller.width = Math.round(canvas.width * 0.75);
+      smaller.height = Math.round(canvas.height * 0.75);
+      var sctx = smaller.getContext("2d");
+      sctx.imageSmoothingEnabled = true;
+      if (sctx.imageSmoothingQuality) sctx.imageSmoothingQuality = "high";
+      sctx.drawImage(canvas, 0, 0, smaller.width, smaller.height);
+      return canvasToJpeg(smaller, maxChars);
+    }
+    return data;
+  }
+
+  function compressPhoto(file) {
+    return loadImageFile(file).then(function (loaded) {
+      var src = loaded.src;
+      var size = sourceSize(src);
+      if (!size.w || !size.h) throw new Error("size");
+      var dest = PHOTO_DISPLAY.hero;
+      var crop = coverCrop(size.w, size.h, dest.w, dest.h);
+      var canvas = drawHighQuality(src, crop.sx, crop.sy, crop.sw, crop.sh, dest.w, dest.h);
+      if (src.close) try { src.close(); } catch (err) {}
+      // Keep a high-res copy for the owner's device. Share links only embed short
+      // data URLs or remote (Cloudinary) URLs, so this can be larger than PHOTO_SHARE_MAX.
+      return canvasToJpeg(canvas, 900000);
+    });
+  }
+
+  function setPhotoUploadProgress(show, ratio, label) {
+    var wrap = $("photo-upload-progress");
+    var bar = $("photo-upload-progress-bar");
+    var text = $("photo-upload-progress-label");
+    if (!wrap) return;
+    wrap.classList.toggle("hidden", !show);
+    if (bar) bar.style.width = Math.round((ratio || 0) * 100) + "%";
+    if (text) text.textContent = label || "מעלה את התמונה…";
+  }
+
   function onPhotoSelected(file) {
-    compressPhoto(file).then(function (data) {
-      state.photo = data;
+    if (!isPhotoFile(file)) {
+      showToast("יש לבחור קובץ תמונה");
+      return;
+    }
+    if (file.size > CLOUDINARY.maxPhotoBytes) {
+      showToast("התמונה גדולה מדי. הגודל המרבי הוא 12MB");
+      return;
+    }
+    setPhotoUploadProgress(true, 0, "מעלה את התמונה… 0%");
+    showToast("מעלה את התמונה…");
+    uploadToCloudinary(file, function (ratio) {
+      setPhotoUploadProgress(true, ratio, "מעלה את התמונה… " + Math.round(ratio * 100) + "%");
+    }, { resourceType: "image", preset: CLOUDINARY.photoPreset }).then(function (res) {
+      state.photo = res.secure_url;
       renderPhotoPreview();
-      showToast(data.length > PHOTO_SHARE_MAX ? "התמונה נשמרה, אבל בקישור יוצגו ראשי תיבות" : "התמונה נוספה");
-    }).catch(function () {
-      showToast("לא ניתן לקרוא את התמונה");
+      setPhotoUploadProgress(true, 1, "התמונה נשמרה בכרטיס");
+      showToast("התמונה נוספה");
+      setTimeout(function () { setPhotoUploadProgress(false, 0); }, 1200);
+    }, function (err) {
+      console.warn("photo upload failed", err);
+      compressPhoto(file).then(function (data) {
+        state.photo = data;
+        renderPhotoPreview();
+        setPhotoUploadProgress(false, 0);
+        showToast(canEmbedPhotoInLink(data)
+          ? "התמונה נוספה"
+          : "התמונה נשמרה בכרטיס, אבל בקישור יוצגו ראשי תיבות");
+      }).catch(function () {
+        setPhotoUploadProgress(false, 0);
+        showToast("לא ניתן לקרוא את התמונה");
+      });
     });
   }
 
@@ -976,10 +1162,6 @@
   }
 
 
-  function photoSrc(photo) {
-    return photo || "";
-  }
-
   function ico(kind) {
     var paths = {
       hand: '<path d="M8 13v-2a2 2 0 1 1 4 0v2M12 13V8a2 2 0 1 1 4 0v5M16 13v-3a2 2 0 1 1 4 0v6a6 6 0 0 1-6 6h-2a6 6 0 0 1-6-6v-3a2 2 0 1 1 4 0v1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
@@ -1008,7 +1190,7 @@
     opts = opts || {};
     var p = card.profile;
     var level = PadelQuiz.levelById(card.levelId) || { id: card.levelId, title: "", numeric: "" };
-    var photo = photoSrc(card.photo || p.photo);
+    var photo = card.photo || p.photo;
     var partner = opts.partner;
     var partnerName = partner ? partner.name : (p.partnerName || "");
     var art = document.createElement("article");
@@ -1063,7 +1245,7 @@
 
     art.innerHTML =
       '<div class="ut-hero' + (photo ? " has-photo" : "") + '">' +
-        (photo ? '<img class="ut-hero-img" alt="' + escapeHtml(p.name) + '" src="' + photo + '">' : "") +
+        (photo ? photoImgTag(photo, opts.compact ? "heroCompact" : "hero", "ut-hero-img", p.name) : "") +
         '<div class="ut-hero-fallback">' + escapeHtml(initials(p.name)) + "</div>" +
         '<div class="ut-hero-shade"></div>' +
         '<div class="ut-hero-content">' +
@@ -1076,7 +1258,25 @@
         '<div class="ut-stats">' + stats.join("") + "</div>" +
         shotsHtml + courts + partnerHtml + vidHtml +
       "</div>";
+    bindHeroPhoto(art);
     return art;
+  }
+
+  function bindHeroPhoto(art) {
+    var img = art.querySelector(".ut-hero-img");
+    var hero = art.querySelector(".ut-hero");
+    if (!img || !hero) return;
+    var mark = function () {
+      if (img.naturalWidth) hero.classList.add("is-ready");
+    };
+    var fail = function () { hero.classList.remove("has-photo", "is-ready"); };
+    if (img.complete) {
+      if (img.naturalWidth) mark();
+      else fail();
+    } else {
+      img.addEventListener("load", mark);
+      img.addEventListener("error", fail);
+    }
   }
 
   function ratingText(level) {
@@ -1238,23 +1438,138 @@
   }
 
   function copyText(url) {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(function () {
-        showToast("הקישור הועתק");
-      }).catch(function () { fallbackCopy(url); });
-    } else {
-      fallbackCopy(url);
+    if (!url) {
+      showToast("אין קישור להעתקה");
+      return;
     }
+    // Start the clipboard write in the same click tick (required on iOS).
+    // Also try a synchronous execCommand fallback while the user gesture is
+    // still valid — if we wait for clipboard.writeText to reject, iOS will
+    // refuse execCommand because the gesture has expired.
+    var synced = syncCopy(url);
+    var startedClipboard = false;
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      try {
+        var maybe = navigator.clipboard.writeText(url);
+        startedClipboard = true;
+        if (maybe && typeof maybe.then === "function") {
+          maybe.then(function () {
+            showToast("הקישור הועתק");
+          }).catch(function () {
+            if (synced) showToast("הקישור הועתק");
+            else shareOrRevealLink(url);
+          });
+        }
+      } catch (err) {
+        startedClipboard = false;
+      }
+    }
+    if (synced) {
+      showToast("הקישור הועתק");
+      return;
+    }
+    if (!startedClipboard) shareOrRevealLink(url);
   }
 
-  function fallbackCopy(url) {
+  function focusAndSelect(el, text) {
+    el.focus();
+    if (typeof el.setSelectionRange === "function") {
+      try { el.setSelectionRange(0, (text || el.value || "").length); return true; }
+      catch (err) {}
+    }
+    if (typeof el.select === "function") {
+      try { el.select(); return true; } catch (err) {}
+    }
+    var sel = window.getSelection && window.getSelection();
+    if (sel && document.createRange) {
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return true;
+    }
+    return false;
+  }
+
+  function tryExecCopy(el, text) {
+    focusAndSelect(el, text);
+    try { return document.execCommand("copy"); } catch (err) { return false; }
+  }
+
+  function syncCopy(text) {
+    var ok = false;
     var ta = document.createElement("textarea");
-    ta.value = url;
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.setAttribute("aria-hidden", "true");
+    ta.contentEditable = "true";
+    ta.readOnly = false;
+    ta.style.cssText = "position:fixed;top:0;right:0;width:1px;height:1px;padding:0;margin:0;border:0;outline:none;box-shadow:none;background:transparent;opacity:0.01;font-size:16px;";
     document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand("copy"); showToast("הקישור הועתק"); }
-    catch (err) { showToast("לא ניתן להעתיק, העתיקו ידנית"); }
+    ok = tryExecCopy(ta, text);
     ta.remove();
+    if (ok) return true;
+
+    var input = document.createElement("input");
+    input.type = "text";
+    input.value = text;
+    input.setAttribute("readonly", "");
+    input.setAttribute("aria-hidden", "true");
+    input.style.cssText = "position:fixed;top:" + (window.pageYOffset || 0) + "px;right:0;width:1px;height:1px;padding:0;margin:0;border:0;outline:none;background:transparent;opacity:0.01;font-size:16px;";
+    document.body.appendChild(input);
+    ok = tryExecCopy(input, text);
+    input.remove();
+    if (ok) return true;
+
+    var holder = document.createElement("div");
+    holder.contentEditable = "true";
+    holder.setAttribute("aria-hidden", "true");
+    holder.style.cssText = "position:fixed;top:0;right:0;width:1px;height:1px;opacity:0.01;font-size:16px;overflow:hidden;";
+    holder.textContent = text;
+    document.body.appendChild(holder);
+    ok = tryExecCopy(holder, text);
+    holder.remove();
+    return ok;
+  }
+
+  function shareOrRevealLink(url) {
+    if (navigator.share) {
+      var sharePromise;
+      try {
+        sharePromise = navigator.share({ title: "כרטיס פאדל", text: "כרטיס השחקן שלי בפאדל", url: url });
+      } catch (err) {
+        sharePromise = null;
+      }
+      if (sharePromise && typeof sharePromise.then === "function") {
+        sharePromise.then(function () {
+          showToast("מוכן לשיתוף");
+        }).catch(function (err) {
+          if (err && err.name === "AbortError") return;
+          revealLink(url);
+        });
+        return;
+      }
+    }
+    revealLink(url);
+  }
+
+  function revealLink(url) {
+    var box = $("link-fallback");
+    var input = $("link-fallback-input");
+    if (!box || !input) {
+      try { window.prompt("העתיקו את הקישור:", url); } catch (err) {}
+      showToast("העתיקו את הקישור ידנית");
+      return;
+    }
+    input.value = url;
+    box.classList.remove("hidden");
+    setTimeout(function () { focusAndSelect(input, url); }, 50);
+    showToast("העתיקו את הקישור ידנית");
+  }
+
+  function hideLinkFallback() {
+    var box = $("link-fallback");
+    if (box) box.classList.add("hidden");
   }
 
   function sendWhatsApp(url) {
@@ -1331,6 +1646,14 @@
     $("copy-own-link").addEventListener("click", function () { copyText(urlToCopyForCard()); });
     $("copy-pair-from-card").addEventListener("click", function () { copyText(urlToCopyForPair()); });
     $("copy-pair-link").addEventListener("click", function () { copyText(urlToCopyForPair()); });
+    $("link-fallback-close").addEventListener("click", hideLinkFallback);
+    $("link-fallback-select").addEventListener("click", function () {
+      var input = $("link-fallback-input");
+      if (input) focusAndSelect(input, input.value);
+    });
+    $("link-fallback").addEventListener("click", function (ev) {
+      if (ev.target === $("link-fallback")) hideLinkFallback();
+    });
     $("open-pair").addEventListener("click", function () { go("pair"); });
     $("edit-profile").addEventListener("click", function () { go("profile"); });
     $("retake-quiz").addEventListener("click", function () { startQuiz(true); });

@@ -121,7 +121,11 @@
                 <strong>העלאת תמונה</strong>
               </label>
               <button class="text-btn hidden" id="photo-remove" type="button">הסרת תמונה</button>
-              <p class="note">התמונה נדחסת ונשמרת במכשיר. בקישור המשותף היא תיסע רק אם היא קטנה מספיק; אחרת יוצגו ראשי תיבות.</p>
+              <div class="upload-progress hidden" id="photo-upload-progress" aria-live="polite">
+                <div class="upload-progress-track"><div class="upload-progress-bar" id="photo-upload-progress-bar"></div></div>
+                <span id="photo-upload-progress-label">מעלה את התמונה…</span>
+              </div>
+              <p class="note">התמונה נשמרת בענן ומופיעה בחדות בכרטיס ובקישור המשותף.</p>
             </div>
           </div>
         </div>
@@ -314,6 +318,15 @@
         <button class="btn btn-ghost" id="share-back" type="button">חזרה</button>
       </div>
     </section>
+  </div>
+  <div id="link-fallback" class="link-fallback hidden" role="dialog" aria-modal="true" aria-labelledby="link-fallback-title">
+    <div class="link-fallback-card">
+      <h2 id="link-fallback-title">העתיקו את הקישור</h2>
+      <p>לחצו על השדה כדי לבחור את הקישור, ואז העתיקו אותו.</p>
+      <input id="link-fallback-input" type="text" readonly dir="ltr" />
+      <button class="btn btn-primary" id="link-fallback-select" type="button">בחירת הקישור</button>
+      <button class="btn btn-ghost" id="link-fallback-close" type="button">סגור</button>
+    </div>
   </div>
   <div id="toast" class="toast" role="status"></div>
   <script src="quiz.js"></script>
