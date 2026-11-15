@@ -217,6 +217,46 @@ body.mode-showcase .logo-mark {
   line-height: 1.1;
   margin-top: 2px;
 }
+.ut-rating-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(200, 255, 60, 0.08);
+  border: 1px solid rgba(200, 255, 60, 0.28);
+}
+.ut-rating-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.ut-rating-value {
+  font-family: "Oswald", "Heebo", sans-serif;
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--lime);
+  line-height: 1;
+  font-style: normal;
+}
+.ut-card.compact .ut-rating-line { padding: 11px 14px; margin-bottom: 10px; }
+.ut-card.compact .ut-rating-value { font-size: 1.4rem; }
+.pair-plate #pair-level-num {
+  direction: ltr;
+  font-family: "Oswald", "Heebo", sans-serif;
+  letter-spacing: 0.02em;
+  font-size: 0.86rem;
+  margin-top: 3px;
+}
+#local-card-actions {
+  display: grid;
+  gap: 10px;
+}
 .ut-line {
   margin: 10px 0 0;
   font-size: 0.86rem;

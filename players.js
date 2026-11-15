@@ -141,14 +141,14 @@
 
 
   var SEED_EXTRAS = {
-    "seed-michal": { region: "telaviv", courts: ["פאדל ת״א צפון", "פאדל יפו"], frequency: "2-3", tenure: "3-5", style: "both", shots: ["vibora", "walls", "volley"], playtomic: "3.4", association: "3.5", phone: "0529876543", hidePhone: false },
-    "seed-alon": { region: "sharon", courts: ["פאדל הרצליה"], frequency: "2-3", tenure: "5plus", style: "social", shots: ["bandeja", "lob", "defense"], playtomic: "3.3", association: "", phone: "0541112233", hidePhone: true },
-    "seed-yuval": { region: "center", courts: ["פאדל ראשון לציון"], frequency: "4plus", tenure: "5plus", style: "competitive", shots: ["smash", "vibora", "volley"], playtomic: "4.1", association: "4.0", phone: "0507654321", hidePhone: false },
-    "seed-shira": { region: "jerusalem", courts: ["פאדל ירושלים"], frequency: "weekly", tenure: "1-2", style: "social", shots: ["lob", "walls"], playtomic: "2.8", association: "3.0", phone: "", hidePhone: false },
-    "seed-daniel": { region: "haifa", courts: ["פאדל חיפה", "קריית מוצקין"], frequency: "4plus", tenure: "3-5", style: "competitive", shots: ["smash", "bandeja", "volley"], playtomic: "4.6", association: "4.5", phone: "0532223344", hidePhone: false },
-    "seed-noa": { region: "shfela", courts: ["פאדל רחובות"], frequency: "2-3", tenure: "1-2", style: "both", shots: ["walls", "defense", "lob"], playtomic: "3.5", association: "", phone: "0583334455", hidePhone: true },
-    "seed-itay": { region: "south", courts: ["פאדל באר שבע"], frequency: "weekly", tenure: "under1", style: "social", shots: ["defense"], playtomic: "1.8", association: "", phone: "", hidePhone: false },
-    "seed-roni": { region: "north", courts: ["פאדל כנרת"], frequency: "2-3", tenure: "5plus", style: "competitive", shots: ["vibora", "smash", "walls"], playtomic: "4.0", association: "4.0", phone: "0524445566", hidePhone: false }
+    "seed-michal": { region: "telaviv", courts: ["פאדל ת״א צפון", "פאדל יפו"], frequency: "2-3", tenure: "3-5", style: "both", shots: ["vibora", "walls", "volley"] },
+    "seed-alon": { region: "sharon", courts: ["פאדל הרצליה"], frequency: "2-3", tenure: "5plus", style: "social", shots: ["bandeja", "lob", "defense"] },
+    "seed-yuval": { region: "center", courts: ["פאדל ראשון לציון"], frequency: "4plus", tenure: "5plus", style: "competitive", shots: ["smash", "vibora", "volley"] },
+    "seed-shira": { region: "jerusalem", courts: ["פאדל ירושלים"], frequency: "weekly", tenure: "1-2", style: "social", shots: ["lob", "walls"] },
+    "seed-daniel": { region: "haifa", courts: ["פאדל חיפה", "קריית מוצקין"], frequency: "4plus", tenure: "3-5", style: "competitive", shots: ["smash", "bandeja", "volley"] },
+    "seed-noa": { region: "shfela", courts: ["פאדל רחובות"], frequency: "2-3", tenure: "1-2", style: "both", shots: ["walls", "defense", "lob"] },
+    "seed-itay": { region: "south", courts: ["פאדל באר שבע"], frequency: "weekly", tenure: "under1", style: "social", shots: ["defense"] },
+    "seed-roni": { region: "north", courts: ["פאדל כנרת"], frequency: "2-3", tenure: "5plus", style: "competitive", shots: ["vibora", "smash", "walls"] }
   };
   SEEDS.forEach(function (p) {
     var extra = SEED_EXTRAS[p.id];

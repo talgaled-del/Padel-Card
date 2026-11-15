@@ -102,10 +102,6 @@
       tenure: state.profile.tenure || "",
       style: state.profile.style || "",
       shots: state.profile.shots || [],
-      playtomic: state.profile.playtomic || "",
-      association: state.profile.association || "",
-      phone: state.profile.phone || "",
-      hidePhone: !!state.profile.hidePhone,
       levelId: state.levelId,
       score: PadelQuiz.totalScore(state.answers),
       photo: state.photo || null,
@@ -210,12 +206,6 @@
     if (p.tenure) data.t = p.tenure;
     if (p.style) data.st = p.style;
     if (p.shots && p.shots.length) data.sk = p.shots;
-    if (p.playtomic) data.ptm = p.playtomic;
-    if (p.association) data.as = p.association;
-    if (p.phone) {
-      data.tel = p.phone;
-      if (p.hidePhone) data.hd = 1;
-    }
     return data;
   }
 
@@ -241,11 +231,7 @@
         frequency: raw.f || "",
         tenure: raw.t || "",
         style: raw.st || "",
-        shots: raw.sk || [],
-        playtomic: raw.ptm || "",
-        association: raw.as || "",
-        phone: raw.tel || "",
-        hidePhone: !!raw.hd
+        shots: raw.sk || []
       },
       levelId: raw.lv,
       score: raw.sc || 0,
@@ -292,11 +278,7 @@
         frequency: p.frequency || "",
         tenure: p.tenure || "",
         style: p.style || "",
-        shots: p.shots || [],
-        playtomic: p.playtomic || "",
-        association: p.association || "",
-        phone: p.phone || "",
-        hidePhone: !!p.hidePhone
+        shots: p.shots || []
       },
       levelId: p.levelId,
       score: p.score || 0,
@@ -449,25 +431,6 @@
     });
   }
 
-  function digitsPhone(phone) {
-    return String(phone || "").replace(/\D/g, "");
-  }
-
-  function formatPhone(phone) {
-    var d = digitsPhone(phone);
-    if (d.length === 10 && d.charAt(0) === "0") return d.slice(0, 3) + "-" + d.slice(3, 6) + "-" + d.slice(6);
-    if (d.length === 12 && d.indexOf("972") === 0) return "0" + d.slice(3, 5) + "-" + d.slice(5, 8) + "-" + d.slice(8);
-    return phone || "";
-  }
-
-  function waNumber(phone) {
-    var d = digitsPhone(phone);
-    if (!d) return "";
-    if (d.indexOf("972") === 0) return d;
-    if (d.charAt(0) === "0") return "972" + d.slice(1);
-    return d;
-  }
-
   function renderCourtList() {
     var box = $("court-list");
     box.innerHTML = "";
@@ -523,37 +486,7 @@
         return '<span class="pill">' + escapeHtml(s) + "</span>";
       }).join("") + "</div>";
     }
-    var ratings = [];
-    if (p.playtomic) ratings.push("Playtomic " + p.playtomic);
-    if (p.association) ratings.push("איגוד " + p.association);
-    if (ratings.length) html += '<p class="extra-line"><b>' + escapeHtml(ratings.join(" · ")) + "</b></p>";
     return html;
-  }
-
-  function fillContactBox(el, p, isPublic) {
-    if (!p.phone) {
-      el.classList.add("hidden");
-      el.innerHTML = "";
-      return;
-    }
-    var wa = waNumber(p.phone);
-    if (!wa) { el.classList.add("hidden"); el.innerHTML = ""; return; }
-    el.classList.remove("hidden");
-    var showNumber = !p.hidePhone || !isPublic;
-    var html = "";
-    if (showNumber) html += '<div class="phone-num">' + escapeHtml(formatPhone(p.phone)) + "</div>";
-    else html += '<div class="extra-line">המספר מוסתר · אפשר לפנות בוואטסאפ</div>';
-    if (p.hidePhone && !isPublic) html += '<div class="extra-line">המספר יוסתר בכרטיס הציבורי</div>';
-    html += '<a class="btn btn-whatsapp btn-contact" href="https://wa.me/' + wa + '" target="_blank" rel="noopener noreferrer">פנייה בוואטסאפ</a>';
-    el.innerHTML = html;
-  }
-
-  function appendContactTo(parent, p, isPublic) {
-    if (!p.phone || !waNumber(p.phone)) return;
-    var box = document.createElement("div");
-    box.className = "contact-box";
-    fillContactBox(box, p, isPublic);
-    parent.appendChild(box);
   }
 
   function setAvatar(elAvatar, elImg, elInitials, name, photo) {
@@ -649,10 +582,6 @@
     setSeg("tenure", p.tenure || "");
     setSeg("style", p.style || "");
     setChecked("shots", p.shots || []);
-    $("playtomic").value = p.playtomic || "";
-    $("association").value = p.association || "";
-    $("phone").value = p.phone || "";
-    $("hide-phone").checked = !!p.hidePhone;
     state.courts = (p.courts || []).slice();
     renderCourtList();
     $("video-link").value = "";
@@ -1026,19 +955,12 @@
       frequency: segValue("frequency"),
       tenure: segValue("tenure"),
       style: segValue("style"),
-      shots: checkedValues("shots"),
-      playtomic: $("playtomic").value.trim(),
-      association: $("association").value.trim(),
-      phone: $("phone").value.trim(),
-      hidePhone: $("hide-phone").checked
+      shots: checkedValues("shots")
     };
     if (!profile.name) return showToast("חסר שם");
     if (!profile.age || Number(profile.age) < 10 || Number(profile.age) > 99) return showToast("גיל לא תקין");
     if (!profile.gender || !profile.hand || !profile.side || !profile.competitor || !profile.hasPartner) {
       return showToast("נא למלא את כל השדות");
-    }
-    if (profile.phone && !waNumber(profile.phone)) {
-      return showToast("מספר הטלפון אינו תקין");
     }
     if (profile.hasPartner === "yes") {
       if (!state.partnerId || !PadelDB.findById(state.partnerId)) {
@@ -1114,17 +1036,6 @@
         }).join("") + "</div>"
       : "";
 
-    var rates = "";
-    if (p.playtomic || p.association) {
-      rates = '<div class="ut-ratings">';
-      if (p.playtomic) rates += '<div class="ut-rate"><span class="rk">Playtomic</span><span class="rv">' + escapeHtml(p.playtomic) + "</span></div>";
-      if (p.association) rates += '<div class="ut-rate"><span class="rk">דירוג איגוד</span><span class="rv">' + escapeHtml(p.association) + "</span></div>";
-      rates += "</div>";
-    }
-
-    var phoneLine = (p.phone && !p.hidePhone)
-      ? '<p class="ut-phone-line">' + escapeHtml(formatPhone(p.phone)) + "</p>"
-      : "";
     var courts = (p.courts && p.courts.length)
       ? '<p class="ut-line">מגרשים קבועים: <b>' + p.courts.map(escapeHtml).join(" · ") + "</b></p>"
       : "";
@@ -1148,10 +1059,7 @@
       vidHtml = "";
     }
 
-    var wa = "";
-    if (opts.compact && p.phone && waNumber(p.phone)) {
-      wa = '<a class="ut-wa-mini" href="https://wa.me/' + waNumber(p.phone) + '" target="_blank" rel="noopener noreferrer">פנייה בוואטסאפ</a>';
-    }
+    var ratingLine = ratingLineHtml(level);
 
     art.innerHTML =
       '<div class="ut-hero' + (photo ? " has-photo" : "") + '">' +
@@ -1160,39 +1068,78 @@
         '<div class="ut-hero-shade"></div>' +
         '<div class="ut-hero-content">' +
           '<div class="ut-id"><h1>' + escapeHtml(p.name) + "</h1><p>" + escapeHtml(identity.join(" · ")) + "</p></div>" +
-          '<div class="' + badgeClass(level.id) + '"><b>' + escapeHtml(level.id) + "</b><span>" + escapeHtml(level.title) + "</span><em>רמה " + escapeHtml(level.numeric) + "</em></div>" +
+          '<div class="' + badgeClass(level.id) + '"><b>' + escapeHtml(level.id) + "</b><span>" + escapeHtml(level.title) + "</span></div>" +
         "</div>" +
       "</div>" +
       '<div class="ut-body">' +
+        ratingLine +
         '<div class="ut-stats">' + stats.join("") + "</div>" +
-        shotsHtml + rates + phoneLine + courts + partnerHtml + vidHtml + wa +
+        shotsHtml + courts + partnerHtml + vidHtml +
       "</div>";
     return art;
   }
 
-  function setupDock(p, isPublic) {
-    var dock = $("card-dock");
-    if (!dock) return;
-    var has = !!(p && p.phone && waNumber(p.phone) && isPublic);
-    dock.classList.toggle("hidden", !has);
-    document.body.classList.toggle("has-dock", has);
-    if (!has) return;
-    $("dock-wa").href = "https://wa.me/" + waNumber(p.phone);
-    var showNum = !p.hidePhone;
-    $("dock-phone").classList.add("hidden");
-    $("dock-phone").textContent = "";
+  function ratingText(level) {
+    if (!level) return "";
+    return (level.id || "") + " · " + (level.numeric || "");
+  }
+
+  function ratingLineHtml(level) {
+    var text = ratingText(level);
+    if (!text || text === " · ") return "";
+    return '<div class="ut-rating-line">' +
+      '<span class="ut-rating-label">דירוג</span>' +
+      '<strong class="ut-rating-value" dir="ltr">' + escapeHtml(text) + "</strong>" +
+      "</div>";
+  }
+
+  function localOwnerId() {
+    return (state.profile && state.profile.id) || "";
+  }
+
+  function cardOwnerId(card) {
+    if (!card) return "";
+    return card.id || (card.profile && card.profile.id) || "";
+  }
+
+  function viewerOwnsCard(card) {
+    var mine = localOwnerId();
+    return !!(mine && cardOwnerId(card) === mine);
+  }
+
+  function viewerOwnsViewedCard() {
+    if (state.publicCard) return viewerOwnsCard(state.publicCard);
+    return !!(state.profile && state.levelId);
+  }
+
+  function viewerOwnsViewedPair() {
+    if (state.publicPair) {
+      return viewerOwnsCard(state.publicPair.a) || viewerOwnsCard(state.publicPair.b);
+    }
+    return !!(state.profile && state.levelId && linkedPartner());
+  }
+
+  function isLocalLiveCard() {
+    return !state.publicCard && !!(state.profile && state.levelId);
+  }
+
+  function isLocalLivePair() {
+    return !state.publicPair && !!(state.profile && state.levelId && linkedPartner());
   }
 
   function renderCard() {
-    var isPublic = !!state.publicCard;
-    var data = isPublic ? state.publicCard : currentCardData();
-    var partner = isPublic ? null : linkedPartner();
-    $("owner-actions").classList.toggle("hidden", isPublic);
-    $("open-pair").classList.toggle("hidden", isPublic || !partner);
+    var data = state.publicCard ? state.publicCard : currentCardData();
+    var owns = viewerOwnsViewedCard();
+    var local = isLocalLiveCard();
+    var partner = local ? linkedPartner() : null;
+    $("owner-actions").classList.toggle("hidden", !owns);
+    $("copy-own-link").classList.toggle("hidden", !owns);
+    $("copy-pair-from-card").classList.toggle("hidden", !local || !partner);
+    $("local-card-actions").classList.toggle("hidden", !local);
+    $("open-pair").classList.toggle("hidden", !local || !partner);
     var root = $("card-root");
     root.innerHTML = "";
     root.appendChild(createPremiumCard(data, { compact: false, partner: partner }));
-    setupDock(data.profile, isPublic);
   }
 
   function renderPairColumn(card) {
@@ -1211,12 +1158,14 @@
       if (!b) { go("card"); return; }
     }
     var summary = PadelDB.pairSummary(a, b);
-    $("pair-owner-actions").classList.toggle("hidden", isPublic);
-    setupDock(null, false);
+    var owns = viewerOwnsViewedPair();
+    $("pair-owner-actions").classList.toggle("hidden", !owns);
+    $("copy-pair-link").classList.toggle("hidden", !owns);
+    $("pair-back-card").classList.toggle("hidden", !isLocalLivePair());
 
     $("pair-level-chip").className = badgeClass(summary.letter);
     $("pair-level-letter").textContent = summary.letter;
-    $("pair-level-num").textContent = summary.numeric;
+    $("pair-level-num").textContent = ratingText({ id: summary.letter, numeric: summary.numeric });
     $("pair-title").textContent = summary.title;
     $("pair-names").textContent = a.profile.name + " · " + a.levelId + "  +  " + b.profile.name + " · " + b.levelId;
     $("pair-blurb").textContent = summary.blurb;
@@ -1252,12 +1201,26 @@
     $("share-url").textContent = currentShareUrl();
   }
 
+  function currentPageUrl() {
+    return location.origin + location.pathname + location.hash;
+  }
+
   function currentShareUrl() {
-    if (state.publicPair) return location.origin + location.pathname + location.hash;
-    if (state.publicCard) return location.origin + location.pathname + location.hash;
+    if (state.publicPair || state.publicCard) return currentPageUrl();
     if (state.shareMode === "pair" && linkedPartner()) {
       return pairShareUrl(currentCardData(), partnerAsCard(linkedPartner()));
     }
+    return singleShareUrl();
+  }
+
+  function urlToCopyForCard() {
+    if (state.publicCard) return currentPageUrl();
+    return singleShareUrl();
+  }
+
+  function urlToCopyForPair() {
+    if (state.publicPair) return currentPageUrl();
+    if (linkedPartner()) return pairShareUrl(currentCardData(), partnerAsCard(linkedPartner()));
     return singleShareUrl();
   }
 
@@ -1312,10 +1275,7 @@
     if (state.view === "share") renderShare();
     var showcase = state.view === "card" || state.view === "pair";
     document.body.classList.toggle("mode-showcase", showcase);
-    if (state.view !== "card") {
-      document.body.classList.remove("has-dock");
-      if ($("card-dock")) $("card-dock").classList.add("hidden");
-    }
+    document.body.classList.remove("has-dock");
     window.scrollTo(0, 0);
   }
 
@@ -1368,10 +1328,9 @@
     $("partner-query").addEventListener("input", function () {
       renderSearchResults(this.value);
     });
-    $("open-share").addEventListener("click", function () {
-      state.shareMode = linkedPartner() ? "pair" : "single";
-      go("share");
-    });
+    $("copy-own-link").addEventListener("click", function () { copyText(urlToCopyForCard()); });
+    $("copy-pair-from-card").addEventListener("click", function () { copyText(urlToCopyForPair()); });
+    $("copy-pair-link").addEventListener("click", function () { copyText(urlToCopyForPair()); });
     $("open-pair").addEventListener("click", function () { go("pair"); });
     $("edit-profile").addEventListener("click", function () { go("profile"); });
     $("retake-quiz").addEventListener("click", function () { startQuiz(true); });
@@ -1386,10 +1345,6 @@
     $("share-wa").addEventListener("click", function () { sendWhatsApp(currentShareUrl()); });
     $("copy-link").addEventListener("click", function () { copyText(currentShareUrl()); });
     $("share-back").addEventListener("click", function () { go("card"); });
-    $("pair-open-share").addEventListener("click", function () {
-      state.shareMode = "pair";
-      go("share");
-    });
     $("pair-back-card").addEventListener("click", function () { go("card"); });
     document.addEventListener("click", function (ev) {
       var tile = ev.target.closest(".ut-video-tile");

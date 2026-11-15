@@ -222,25 +222,6 @@
             <label><input type="checkbox" name="shots" value="defense" /> הגנה</label>
           </div>
         </fieldset>
-        <div class="field">
-          <span class="legend">דירוג חיצוני <span class="opt">לא חובה</span></span>
-          <div class="ratings-row">
-            <label class="subfield">Playtomic
-              <input id="playtomic" name="playtomic" type="text" inputmode="decimal" dir="ltr" placeholder="למשל 3.25" maxlength="6" />
-            </label>
-            <label class="subfield">דירוג איגוד
-              <input id="association" name="association" type="text" inputmode="decimal" dir="ltr" placeholder="למשל 3.5" maxlength="8" />
-            </label>
-          </div>
-        </div>
-        <div class="field">
-          <label for="phone">טלפון <span class="opt">לא חובה</span></label>
-          <input id="phone" name="phone" type="tel" dir="ltr" inputmode="tel" autocomplete="tel" placeholder="050-0000000" maxlength="16" />
-          <label class="check-line">
-            <input type="checkbox" id="hide-phone" />
-            הסתר טלפון בכרטיס הציבורי — יישאר כפתור פנייה בוואטסאפ, בלי להציג את המספר
-          </label>
-        </div>
         <fieldset class="field" style="border:0;padding:0;margin:0">
           <legend class="legend">פרטנר קבוע</legend>
           <div class="seg">
@@ -279,16 +260,15 @@
 
     <section id="view-card" class="view hidden">
       <div id="card-root"></div>
-      <div class="ut-dock hidden" id="card-dock">
-        <div class="dock-phone hidden" id="dock-phone"></div>
-        <a class="btn btn-whatsapp btn-dock" id="dock-wa" href="#" target="_blank" rel="noopener noreferrer">פנייה בוואטסאפ</a>
-      </div>
       <div class="ut-owner-bar hidden" id="owner-actions">
-        <button class="btn btn-primary" id="open-share" type="button">שיתוף קישור</button>
-        <button class="btn btn-ghost hidden" id="open-pair" type="button">צפייה בכרטיס הזוג</button>
-        <div class="btn-row two">
-          <button class="btn btn-ghost" id="edit-profile" type="button">עריכת פרטים</button>
-          <button class="btn btn-ghost" id="retake-quiz" type="button">קביעת רמה מחדש</button>
+        <button class="btn btn-primary" id="copy-own-link" type="button">העתק קישור</button>
+        <button class="btn btn-ghost hidden" id="copy-pair-from-card" type="button">העתק קישור לזוג</button>
+        <div id="local-card-actions" class="hidden">
+          <button class="btn btn-ghost hidden" id="open-pair" type="button">צפייה בכרטיס הזוג</button>
+          <div class="btn-row two">
+            <button class="btn btn-ghost" id="edit-profile" type="button">עריכת פרטים</button>
+            <button class="btn btn-ghost" id="retake-quiz" type="button">קביעת רמה מחדש</button>
+          </div>
         </div>
       </div>
     </section>
@@ -307,8 +287,8 @@
       </header>
       <div class="pair-stack" id="pair-grid"></div>
       <div class="ut-owner-bar hidden" id="pair-owner-actions">
-        <button class="btn btn-primary" id="pair-open-share" type="button">שיתוף קישור</button>
-        <button class="btn btn-ghost" id="pair-back-card" type="button">חזרה לכרטיס שלי</button>
+        <button class="btn btn-primary" id="copy-pair-link" type="button">העתק קישור</button>
+        <button class="btn btn-ghost hidden" id="pair-back-card" type="button">חזרה לכרטיס שלי</button>
       </div>
     </section>
 
