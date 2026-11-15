@@ -76,7 +76,7 @@
         { label: "רק התחלתי — כמה שבועות או פחות", score: 0 },
         { label: "כמה חודשים", score: 1 },
         { label: "בערך שנה עד שנתיים", score: 2 },
-        { label: "יותר משנתיים, עם אימונים קבועים", score: 4 }
+        { label: "יותר משנתיים", score: 4 }
       ]
     },
     {
@@ -86,7 +86,18 @@
         { label: "פחות מפעם בשבוע", score: 0 },
         { label: "בערך פעם בשבוע", score: 1 },
         { label: "שתיים–שלוש פעמים בשבוע", score: 3 },
-        { label: "ארבע פעמים או יותר, כולל אימונים", score: 4 }
+        { label: "ארבע פעמים או יותר", score: 4 }
+      ]
+    },
+    {
+      id: "training",
+      text: "אתם מתאמנים פאדל?",
+      hint: "אימון עם מאמן, קבוצתי או פרטי — לא משחק רגיל.",
+      options: [
+        { label: "לא, רק משחק", score: 0 },
+        { label: "התאמנתי בעבר או מדי פעם", score: 1 },
+        { label: "כן, אימון קבוע פעם בשבוע", score: 3 },
+        { label: "כן, כמה אימונים בשבוע", score: 4 }
       ]
     },
     {
@@ -193,11 +204,14 @@
     }
   ];
 
+  // Level thresholds are on a 0–48 scale; raw sums are scaled to it.
+  var SCALE_MAX = 48;
   function totalScore(answers) {
-    return answers.reduce(function (sum, index, qIndex) {
-      if (index == null || !QUESTIONS[qIndex]) return sum;
+    var raw = answers.reduce(function (sum, index, qIndex) {
+      if (index == null || !QUESTIONS[qIndex] || !QUESTIONS[qIndex].options[index]) return sum;
       return sum + QUESTIONS[qIndex].options[index].score;
     }, 0);
+    return Math.round(raw * SCALE_MAX / (QUESTIONS.length * 4));
   }
 
   function levelFromScore(score) {
@@ -217,6 +231,6 @@
     totalScore: totalScore,
     levelFromScore: levelFromScore,
     levelById: levelById,
-    maxScore: QUESTIONS.length * 4
+    maxScore: SCALE_MAX
   };
 })(window);
