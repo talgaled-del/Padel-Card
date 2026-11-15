@@ -1,0 +1,13 @@
+{
+  "name": "padel-card-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Rating backend for the padel player card (Gemini video analysis).",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "mock": "MOCK_AI=1 node server.js"
+  }
+}

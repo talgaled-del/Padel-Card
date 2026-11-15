@@ -14,6 +14,15 @@
     videoTimeoutMs: 5 * 60 * 1000
   };
 
+  // AI Rating backend (server/ in the repo, Render web service "padel-card-api").
+  // Local dev: served on :8787. Override with localStorage "padelCard.apiBase".
+  const AI_API = (function () {
+    var base = "https://padel-card-api.onrender.com";
+    if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) base = "http://127.0.0.1:8787";
+    try { base = localStorage.getItem("padelCard.apiBase") || base; } catch (err) {}
+    return { base: base.replace(/\/+$/, ""), timeoutMs: 5 * 60 * 1000 };
+  })();
+
   const PHOTO_UPLOAD = {
     maxEdge: 2000,
     quality: 0.9,
@@ -120,6 +129,7 @@
       tenure: normalizeTenure(state.profile.tenure || ""),
       style: state.profile.style || "",
       shots: state.profile.shots || [],
+      ai: cleanAi(state.profile.ai),
       levelId: state.levelId,
       score: PadelQuiz.totalScore(state.answers),
       photo: state.photo || null,
@@ -315,6 +325,8 @@
     if (p.tenure) data.t = normalizeTenure(p.tenure);
     if (p.style) data.st = p.style;
     if (p.shots && p.shots.length) data.sk = p.shots;
+    var ai = cleanAi(p.ai || src.ai);
+    if (ai) data.ai = ai;
     return data;
   }
 
@@ -340,7 +352,8 @@
         frequency: raw.f || "",
         tenure: normalizeTenure(raw.t || ""),
         style: raw.st || "",
-        shots: raw.sk || []
+        shots: raw.sk || [],
+        ai: cleanAi(raw.ai)
       },
       levelId: raw.lv,
       score: raw.sc || 0,
@@ -390,7 +403,8 @@
         frequency: p.frequency || "",
         tenure: normalizeTenure(p.tenure || ""),
         style: p.style || "",
-        shots: p.shots || []
+        shots: p.shots || [],
+        ai: cleanAi(p.ai)
       },
       levelId: p.levelId,
       score: p.score || 0,
@@ -494,12 +508,12 @@
     else location.hash = "#/" + view;
   }
 
-  function showToast(msg) {
+  function showToast(msg, ms) {
     var el = $("toast");
     el.textContent = msg;
     el.classList.add("show");
     clearTimeout(showToast._t);
-    showToast._t = setTimeout(function () { el.classList.remove("show"); }, 2200);
+    showToast._t = setTimeout(function () { el.classList.remove("show"); }, ms || 2200);
   }
 
   function initials(name) {
@@ -2287,7 +2301,8 @@
       frequency: segValue("frequency"),
       tenure: normalizeTenure(segValue("tenure")),
       style: segValue("style"),
-      shots: checkedValues("shots")
+      shots: checkedValues("shots"),
+      ai: cleanAi(state.profile && state.profile.ai)
     };
     if (!profile.name) return showToast("חסר שם");
     if (!profile.age || Number(profile.age) < 10 || Number(profile.age) > 99) return showToast("גיל לא תקין");
@@ -2387,7 +2402,8 @@
       vidHtml = "";
     }
 
-    var ratingLine = ratingLineHtml(level);
+    var ratingLine = ratingLineHtml(level) + aiRatingHtml(cleanAi(p.ai), opts);
+    if (opts.allowReupload && !opts.compact) vidHtml += aiCtaHtml(videos, cleanAi(p.ai));
 
     art.innerHTML =
       '<div class="ut-hero' + (photo ? " has-photo" : "") + '">' +
@@ -2436,10 +2452,360 @@
     var text = ratingText(level);
     if (!text || text === " · ") return "";
     return '<div class="ut-rating-line">' +
-      '<span class="ut-rating-label">דירוג</span>' +
+      '<span class="ut-rating-label">רמה לפי השאלון</span>' +
       '<strong class="ut-rating-value" dir="ltr">' + escapeHtml(text) + "</strong>" +
       "</div>";
   }
+
+  /* ---------- AI Rating ---------- */
+  // Stored compactly in the card (and the share-link hash):
+  // { l: "C1", c: 0|1|2 (low/medium/high), n: videos, d: yymmdd, e: "≤200 chars", s: [volley, bandeja, vibora, smash, wall, positioning, consistency, pace] (0–10 or null) }
+  var AI_CONF = [
+    { key: "low", label: "ביטחון נמוך" },
+    { key: "medium", label: "ביטחון בינוני" },
+    { key: "high", label: "ביטחון גבוה" }
+  ];
+  var AI_SUBS = [
+    { key: "volley", label: "וולי", group: "tech" },
+    { key: "bandeja", label: "בנדחה", group: "tech" },
+    { key: "vibora", label: "ויבורה", group: "tech" },
+    { key: "smash", label: "סמאש", group: "tech" },
+    { key: "wall_play", label: "משחק קירות" },
+    { key: "positioning", label: "מיקום מול השותף" },
+    { key: "consistency", label: "עקביות" },
+    { key: "rally_pace", label: "קצב ראלי" }
+  ];
+  var aiState = { running: false, warmed: false };
+
+  function cleanAi(ai) {
+    if (!ai || typeof ai !== "object") return null;
+    if (!PadelQuiz.levelById(ai.l)) return null;
+    var c = Number(ai.c);
+    var out = {
+      l: ai.l,
+      c: c === 0 || c === 1 || c === 2 ? c : 0,
+      n: Math.max(1, Math.min(9, Math.round(Number(ai.n) || 1))),
+      d: Math.round(Number(ai.d) || 0),
+      e: String(ai.e || "").slice(0, 200),
+      s: (Array.isArray(ai.s) ? ai.s : []).slice(0, AI_SUBS.length).map(function (v) {
+        if (v === null || v === undefined || v === "") return null;
+        var n = Number(v);
+        return isFinite(n) ? Math.max(0, Math.min(10, Math.round(n))) : null;
+      })
+    };
+    while (out.s.length < AI_SUBS.length) out.s.push(null);
+    return out;
+  }
+
+  function aiFromServer(res) {
+    var conf = { low: 0, medium: 1, high: 2 }[res.confidence];
+    var now = new Date();
+    var d = (now.getFullYear() % 100) * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+    var subs = res.subscores || {};
+    return cleanAi({
+      l: res.level,
+      c: conf == null ? 0 : conf,
+      n: res.videoCount || 1,
+      d: d,
+      e: res.explanation || "",
+      s: AI_SUBS.map(function (k) { return subs[k.key]; })
+    });
+  }
+
+  function aiDateText(d) {
+    if (!d) return "";
+    var yy = Math.floor(d / 10000), mm = Math.floor(d / 100) % 100, dd = d % 100;
+    return dd + "." + mm + ".20" + (yy < 10 ? "0" : "") + yy;
+  }
+
+  function aiVideosText(n) {
+    return n === 1 ? "מבוסס על סרטון אחד" : "מבוסס על " + n + " סרטונים";
+  }
+
+  function aiBarHtml(sub, v) {
+    var seen = v !== null && v !== undefined;
+    return '<div class="ai-bar' + (seen ? "" : " is-empty") + '">' +
+      '<span class="ai-bar-k">' + escapeHtml(sub.label) + "</span>" +
+      '<span class="ai-bar-track"><span class="ai-bar-fill" style="width:' + (seen ? v * 10 : 0) + '%"></span></span>' +
+      '<span class="ai-bar-v" dir="ltr">' + (seen ? v + "/10" : "לא נצפה") + "</span>" +
+      "</div>";
+  }
+
+  function aiRatingHtml(ai, opts) {
+    if (!ai) return "";
+    var level = PadelQuiz.levelById(ai.l);
+    var conf = AI_CONF[ai.c] || AI_CONF[0];
+    var tech = [], rest = [];
+    AI_SUBS.forEach(function (sub, i) {
+      (sub.group === "tech" ? tech : rest).push(aiBarHtml(sub, ai.s[i]));
+    });
+    var details =
+      '<div class="ut-ai-details" hidden>' +
+        (ai.e ? '<p class="ut-ai-expl">' + escapeHtml(ai.e) + "</p>" : "") +
+        '<p class="ut-ai-group">טכניקה</p>' + tech.join("") +
+        '<p class="ut-ai-group">משחק</p>' + rest.join("") +
+        '<p class="ut-ai-foot">הערכה אוטומטית מהסרטונים' + (ai.d ? " · " + aiDateText(ai.d) : "") + ". לא דירוג רשמי.</p>" +
+      "</div>";
+    return '<div class="ut-ai' + (opts && opts.compact ? " compact" : "") + '">' +
+      '<button type="button" class="ut-ai-line" aria-expanded="false">' +
+        '<span class="ut-ai-main">' +
+          '<span class="ut-ai-label"><span class="ut-ai-spark" aria-hidden="true">✦</span>AI Rating</span>' +
+          '<span class="ut-ai-meta"><span class="ai-conf conf-' + conf.key + '">' + conf.label + "</span>" +
+          '<span class="ai-count">' + aiVideosText(ai.n) + "</span></span>" +
+        "</span>" +
+        '<strong class="ut-ai-value" dir="ltr">' + escapeHtml(ratingText(level)) + "</strong>" +
+        '<span class="ut-ai-chev" aria-hidden="true"></span>' +
+      "</button>" +
+      details +
+    "</div>";
+  }
+
+  function aiEligibleVideos(videos) {
+    return (videos || []).filter(function (v) {
+      return v.link && isCloudinaryVideo(v.link) || (v.link && isDirectVideo(v.link) && /^https?:/i.test(v.link));
+    });
+  }
+
+  function aiCtaHtml(videos, ai) {
+    var list = aiEligibleVideos(videos);
+    if (!list.length) return "";
+    var running = aiState.running;
+    return '<div class="ut-ai-cta">' +
+      '<button type="button" class="btn btn-ai' + (running ? " is-loading" : "") + '" id="ai-rate-btn"' + (running ? ' disabled aria-busy="true"' : "") + ">" +
+        (running
+          ? '<span class="ai-spinner" aria-hidden="true"></span><span>מנתח את המשחק… זה יכול לקחת דקה</span>'
+          : '<span class="ut-ai-spark" aria-hidden="true">✦</span><span>' + (ai ? "עדכון AI Rating" : "קבל AI Rating") + "</span>") +
+      "</button>" +
+      '<p class="ut-ai-hint">' + (running
+        ? "אפשר להישאר בעמוד. התוצאה תישמר בכרטיס."
+        : "ה-AI צופה בסרטונים שבהם סימנת את עצמך ומעריך את הרמה. כדאי לפחות 2 דקות משחק.") + "</p>" +
+    "</div>";
+  }
+
+  /* Clothing colours from the first frame, inside the marked start box.
+     Indoor courts are often lit/filmed with a strong blue cast (blue floor, glass, mesh),
+     so in a blue-cast frame blue-ish pixels are read by lightness only: dark → black,
+     very light → white, otherwise ignored. The server labels these as "may be wrong". */
+  function rgbToColorName(r, g, b, blueCast) {
+    var max = Math.max(r, g, b) / 255, min = Math.min(r, g, b) / 255;
+    var l = (max + min) / 2;
+    var d = max - min;
+    var s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    if (l < 0.16) return "black";
+    if (s < 0.16) return l > 0.75 ? "white" : l < 0.3 ? "black" : "gray";
+    if (l > 0.88) return "white";
+    var h;
+    var R = r / 255, G = g / 255, B = b / 255;
+    if (max === R) h = ((G - B) / d) % 6;
+    else if (max === G) h = (B - R) / d + 2;
+    else h = (R - G) / d + 4;
+    h = (h * 60 + 360) % 360;
+    if (blueCast && h >= 180 && h < 250) {
+      if (l < 0.3) return "black";
+      if (l > 0.66) return "white";
+      return "";
+    }
+    if (h < 15 || h >= 340) return l > 0.7 ? "pink" : "red";
+    if (h < 40) return l < 0.35 ? "brown" : (s < 0.45 && l > 0.6 ? "beige" : "orange");
+    if (h < 68) return "yellow";
+    if (h < 160) return "green";
+    if (h < 195) return "turquoise";
+    if (h < 250) return l < 0.3 ? "navy" : "blue";
+    if (h < 290) return "purple";
+    return "pink";
+  }
+
+  function frameHasBlueCast(ctx, W, H) {
+    var data;
+    try { data = ctx.getImageData(0, 0, W, H).data; } catch (err) { return false; }
+    var r = 0, b = 0, n = 0;
+    for (var i = 0; i < data.length; i += 4 * 16) { r += data[i]; b += data[i + 2]; n++; }
+    return n > 0 && b / n > 1.5 * (r / n) + 20;
+  }
+
+  function dominantColor(ctx, x, y, w, h, blueCast) {
+    x = Math.max(0, Math.round(x)); y = Math.max(0, Math.round(y));
+    w = Math.max(1, Math.round(w)); h = Math.max(1, Math.round(h));
+    var data;
+    try { data = ctx.getImageData(x, y, w, h).data; } catch (err) { return ""; }
+    var counts = {}, total = 0;
+    for (var i = 0; i < data.length; i += 4) {
+      var name = rgbToColorName(data[i], data[i + 1], data[i + 2], blueCast);
+      total++;
+      if (!name) continue;
+      counts[name] = (counts[name] || 0) + 1;
+    }
+    var best = "", bestN = 0;
+    Object.keys(counts).forEach(function (k) { if (counts[k] > bestN) { best = k; bestN = counts[k]; } });
+    return bestN / Math.max(1, total) >= 0.35 ? best : "";
+  }
+
+  function sampleAppearance(src, box, t) {
+    return new Promise(function (resolve) {
+      if (!box || !src) { resolve(null); return; }
+      var video = document.createElement("video");
+      var done = false;
+      var finish = function (val) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        try { video.removeAttribute("src"); video.load(); } catch (err) {}
+        resolve(val);
+      };
+      var timer = setTimeout(function () { finish(null); }, 9000);
+      video.muted = true;
+      video.playsInline = true;
+      video.setAttribute("playsinline", "");
+      video.preload = "auto";
+      video.crossOrigin = "anonymous";
+      video.addEventListener("error", function () { finish(null); });
+      video.addEventListener("loadeddata", function () {
+        try { video.currentTime = Math.max(0.05, t || 0.05); } catch (err) { finish(null); }
+      }, { once: true });
+      video.addEventListener("seeked", function () {
+        try {
+          var W = Math.min(960, video.videoWidth || 960);
+          var H = Math.round(W * (video.videoHeight || 540) / (video.videoWidth || 960));
+          var c = document.createElement("canvas");
+          c.width = W; c.height = H;
+          var ctx = c.getContext("2d", { willReadFrequently: true });
+          ctx.drawImage(video, 0, 0, W, H);
+          var bx = box.x * W, by = box.y * H, bw = box.w * W, bh = box.h * H;
+          var cast = frameHasBlueCast(ctx, W, H);
+          var top = dominantColor(ctx, bx + bw * 0.3, by + bh * 0.2, bw * 0.4, bh * 0.3, cast);
+          var bottom = dominantColor(ctx, bx + bw * 0.3, by + bh * 0.66, bw * 0.4, bh * 0.14, cast);
+          finish(top || bottom ? { top: top, bottom: bottom } : null);
+        } catch (err) { finish(null); }
+      }, { once: true });
+      video.src = src;
+      try { video.load(); } catch (err) {}
+    });
+  }
+
+  function trackForAi(v) {
+    if (v.track && typeof v.track === "object" && (v.track.k || v.track.m)) return Promise.resolve(v.track);
+    if (!v.trackUrl) return Promise.resolve(null);
+    return fetch(v.trackUrl, { mode: "cors" }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+  }
+
+  function prepareAiVideo(v) {
+    return trackForAi(v).then(function (packed) {
+      var item = { videoUrl: v.link, duration: v.duration || (packed && packed.d ? packed.d / 100 : 0) };
+      if (packed) item.track = packed;
+      else if (v.trackUrl) item.trackUrl = v.trackUrl;
+      var unpacked = packed && window.PadelTrack ? PadelTrack.unpack(packed) : null;
+      var box = unpacked && unpacked.startBox;
+      if (!box) return item;
+      var src = playableCloudinaryUrl(v.link) || v.link;
+      return sampleAppearance(src, box, unpacked.t0 || 0).then(function (look) {
+        if (look) item.appearance = look;
+        return item;
+      });
+    });
+  }
+
+  function viewedCardForAi() {
+    return state.publicCard && viewerOwnsCard(state.publicCard) ? state.publicCard : (state.profile ? currentCardData() : null);
+  }
+
+  function aiErrorMessage(err) {
+    if (err && err.userMessage) return err.userMessage;
+    if (err && err.name === "AbortError") return "הניתוח לקח יותר מדי זמן. נסו שוב";
+    return "אין חיבור לשרת ה-AI. נסו שוב בעוד רגע";
+  }
+
+  function warmAiServer() {
+    if (aiState.warmed) return;
+    aiState.warmed = true;
+    // Free Render instances sleep when idle; wake it while the owner is looking at the card.
+    try { fetch(AI_API.base + "/healthz", { mode: "cors" }).catch(function () {}); } catch (err) {}
+  }
+
+  function requestAiRating() {
+    if (aiState.running) return;
+    var card = viewedCardForAi();
+    if (!card || !viewerOwnsViewedCard()) return;
+    var list = aiEligibleVideos(card.videos);
+    if (!list.length) { showToast("העלו סרטון משחק כדי לקבל AI Rating", 3500); return; }
+    var marked = list.filter(function (v) { return v.trackUrl || v.track || v.marker; });
+    if (!marked.length) { showToast("סמנו את עצמכם בסרטון לפני הניתוח", 3500); return; }
+    aiState.running = true;
+    rerenderAfterAi();
+    var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, AI_API.timeoutMs);
+    var p = card.profile || {};
+    Promise.all(marked.slice(0, 3).map(prepareAiVideo)).then(function (videos) {
+      return fetch(AI_API.base + "/api/ai-rating", {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cardId: cardOwnerId(card), videos: videos, profile: { hand: p.hand, gender: p.gender } }),
+        signal: ctrl ? ctrl.signal : undefined
+      });
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (json) {
+        if (!res.ok || !json || !json.level) {
+          var e = new Error(json && json.error || "http-" + res.status);
+          e.userMessage = (json && json.message) || "ניתוח ה-AI נכשל. נסו שוב";
+          throw e;
+        }
+        return json;
+      });
+    }).then(function (json) {
+      var ai = aiFromServer(json);
+      if (!ai) throw Object.assign(new Error("bad-result"), { userMessage: "ניתוח ה-AI החזיר תשובה לא תקינה. נסו שוב" });
+      if (state.profile) {
+        state.profile.ai = ai;
+        persist();
+      }
+      if (state.publicCard && viewerOwnsCard(state.publicCard)) {
+        state.publicCard.profile.ai = ai;
+        try { history.replaceState(null, "", "#/p/" + toBase64Url(JSON.stringify(compactPlayer(state.publicCard, true)))); } catch (err) {}
+      }
+      aiState.running = false;
+      aiState.justRated = true;
+      rerenderAfterAi();
+      showToast("ה-AI Rating נשמר בכרטיס. שתפו שוב את הקישור כדי שכולם יראו", 4000);
+    }).catch(function (err) {
+      console.warn("ai-rating", err);
+      aiState.running = false;
+      rerenderAfterAi();
+      showToast(aiErrorMessage(err), 4500);
+    }).then(function () { clearTimeout(timer); });
+  }
+
+  function rerenderAfterAi() {
+    if (state.view !== "card") return;
+    var y = window.scrollY;
+    renderCard();
+    window.scrollTo(0, y);
+    if (aiState.justRated) {
+      aiState.justRated = false;
+      var line = document.querySelector("#card-root .ut-ai-line");
+      if (line) {
+        toggleAiDetails(line, true);
+        line.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }
+  }
+
+  function toggleAiDetails(btn, force) {
+    var wrap = btn.closest(".ut-ai");
+    var det = wrap && wrap.querySelector(".ut-ai-details");
+    if (!det) return;
+    var open = typeof force === "boolean" ? force : det.hidden;
+    det.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    wrap.classList.toggle("is-open", open);
+  }
+
+  document.addEventListener("click", function (ev) {
+    var t = ev.target;
+    if (!t || !t.closest) return;
+    var line = t.closest(".ut-ai-line");
+    if (line) { toggleAiDetails(line); return; }
+    if (t.closest("#ai-rate-btn")) { ev.preventDefault(); requestAiRating(); }
+  });
 
   function localOwnerId() {
     return (state.profile && state.profile.id) || "";
@@ -2489,6 +2855,7 @@
     var root = $("card-root");
     root.innerHTML = "";
     root.appendChild(createPremiumCard(data, { compact: false, partner: partner, allowReupload: owns }));
+    if (owns && aiEligibleVideos(data.videos).length) warmAiServer();
   }
 
   function renderPairColumn(card) {

@@ -14,7 +14,7 @@ python3 -m http.server 8765 --directory /workspace/padel-card
 
 לא לפרוס לציבור — זה אבטיפוס בלבד.
 
-הנכסים הסטטיים נטענים מתיקייה `v10-2/` (למשל `v10-2/app.js`) כדי לעקוף את מטמון ה-CDN של Render, שמתעלם ממחרוזת `?v=N`. אחרי עדכון, מעתיקים את הקבצים לתיקיית גרסה חדשה ומעדכנים את `index.html`.
+הנכסים הסטטיים נטענים מתיקייה `v12/` (למשל `v12/app.js`) כדי לעקוף את מטמון ה-CDN של Render, שמתעלם ממחרוזת `?v=N`. אחרי עדכון, מעתיקים את הקבצים לתיקיית גרסה חדשה ומעדכנים את `index.html`.
 
 ## סולם הרמות
 
@@ -40,3 +40,14 @@ D2 (2.0 מתחיל) · D1 (2.5) · C2 (3.0) · C1 (3.5) · B2 (4.0) · B1 (4.5) 
 דמו אחרי הפריסה:
 - כרטיס יחיד: `{URL}/#/demo/michal`
 - כרטיס זוג: `{URL}/#/demo/pair`
+
+## AI Rating (v12)
+
+בעל הכרטיס לוחץ «קבל AI Rating» ליד הסרטונים. השרת (`server/`) מוריד את הסרטון מ-Cloudinary, שולח אותו ל-Gemini יחד עם תיאור השחקן המסומן (חצי המגרש, צד, מיקומים לאורך הסרטון וצבע בגדים), ומחזיר רמה בסולם האותיות, ביטחון, הסבר קצר וציוני משנה. התוצאה נשמרת בכרטיס ובקישור המשותף (`ai` ב-hash).
+
+- `POST /api/ai-rating` — `{ videoUrl, track, cardId }` או `{ videos: [{ videoUrl, track | trackUrl, duration, appearance }], cardId, profile }`
+- `GET /healthz`
+- משתני סביבה: `GEMINI_API_KEY` (חובה), `GEMINI_MODEL` (ברירת מחדל `gemini-3.8-flash`), `ALLOWED_ORIGINS`, `MOCK_AI=1` לבדיקות, `RATE_PER_HOUR`/`RATE_PER_DAY`/`MAX_CONCURRENT`.
+- הרצה מקומית במצב בדיקה: `cd server && MOCK_AI=1 EXTRA_VIDEO_HOSTS=127.0.0.1:18767 PORT=8787 node server.js`, ואז `node scripts/verify-v12.mjs`.
+- קריאה אמיתית אחת מקובץ מקומי: `GEMINI_API_KEY=... node server/try-local.js video.mp4 track.json 30 black`.
+- בצד הלקוח כתובת השרת מוגדרת ב-`AI_API` בראש `app.js` (`https://padel-card-api.onrender.com`; ב-localhost `http://127.0.0.1:8787`; אפשר לעקוף עם `localStorage["padelCard.apiBase"]`).
