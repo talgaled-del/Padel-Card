@@ -5,12 +5,13 @@
   var detectorStatus = "idle";
   var TF_SRC = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
   var COCO_SRC = "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js";
-  var DEFAULT_INTERVAL = 0.28;
+  var DEFAULT_INTERVAL = 0.2;
+  var TRACK_VERSION = 2;
   var HOLD_SEC = 4;
   var DEFAULT_R = 0.12;
   var DETECT_MAX = 640;
   var DETECTOR_TIMEOUT_MS = 14000;
-  var PERSON_SCORE = 0.28;
+  var PERSON_SCORE = 0.2;
   var TMPL_SIZE = 32;
 
   function withTimeout(promise, ms, label) {
@@ -210,7 +211,7 @@
     var c = document.createElement("canvas");
     c.width = w;
     c.height = h;
-    var ctx = c.getContext("2d");
+    var ctx = c.getContext("2d", { willReadFrequently: true });
     ctx.drawImage(video, 0, 0, w, h);
     return c;
   }
@@ -283,31 +284,46 @@
       err.code = "tainted";
       return Promise.reject(err);
     }
+    function pushCrop(jobs, meta, sx, sy, sw, sh, maxEdge) {
+      sx = Math.max(0, Math.round(sx));
+      sy = Math.max(0, Math.round(sy));
+      sw = Math.max(8, Math.round(Math.min(sw, vw - sx)));
+      sh = Math.max(8, Math.round(Math.min(sh, vh - sy)));
+      var canvas = cropSource(video, sx, sy, sw, sh, maxEdge || DETECT_MAX);
+      jobs.push(runDetect(model, canvas));
+      meta.push({ sx: sx, sy: sy, sw: sw, sh: sh, cw: canvas.width, ch: canvas.height, canvas: canvas });
+    }
     return detectOnCanvas(model, full).then(function (boxes) {
       var small = !boxes.length || boxes.every(function (b) { return b.h < 0.22 && b.w < 0.2; });
       var wide = vw >= 800;
-      var needTiles = boxes.length < 3 || (wide && small);
-      if (!needTiles) return boxes;
-      var cols = vw >= 800 ? 2 : 1;
-      var rows = vh >= 500 ? 2 : 1;
-      if (cols * rows === 1) return boxes;
-      var overlap = 0.22;
-      var tileW = vw / (cols - (cols - 1) * overlap);
-      var tileH = vh / (rows - (rows - 1) * overlap);
       var jobs = [];
       var meta = [];
-      var r, c, sx, sy, sw, sh, canvas;
-      for (r = 0; r < rows; r++) {
-        for (c = 0; c < cols; c++) {
-          sx = Math.max(0, Math.round(c * tileW * (1 - overlap)));
-          sy = Math.max(0, Math.round(r * tileH * (1 - overlap)));
-          sw = Math.min(tileW, vw - sx);
-          sh = Math.min(tileH, vh - sy);
-          canvas = cropSource(video, sx, sy, sw, sh, DETECT_MAX);
-          jobs.push(runDetect(model, canvas));
-          meta.push({ sx: sx, sy: sy, sw: sw, sh: sh, cw: canvas.width, ch: canvas.height, canvas: canvas });
+      // Near-court crop: mesh-covered near players are large in this region
+      // but tiny in the full 640px pass, so run a dedicated higher-res crop.
+      pushCrop(jobs, meta, vw * 0.08, vh * 0.08, vw * 0.84, vh * 0.62, 800);
+      var needTiles = boxes.length < 4 || (wide && small);
+      if (needTiles && vw >= 700) {
+        var cols = 2;
+        var rows = vh >= 500 ? 2 : 1;
+        var overlap = 0.22;
+        var tileW = vw / (cols - (cols - 1) * overlap);
+        var tileH = vh / (rows - (rows - 1) * overlap);
+        var r, c;
+        for (r = 0; r < rows; r++) {
+          for (c = 0; c < cols; c++) {
+            pushCrop(
+              jobs,
+              meta,
+              c * tileW * (1 - overlap),
+              r * tileH * (1 - overlap),
+              tileW,
+              tileH,
+              DETECT_MAX
+            );
+          }
         }
       }
+      if (!jobs.length) return boxes;
       return Promise.all(jobs).then(function (results) {
         var all = boxes.slice();
         results.forEach(function (preds, i) {
@@ -434,6 +450,373 @@
     return union > 0 ? inter / union : 0;
   }
 
+  var UNMATCHED_COST = 3.2;
+  var HIST_BINS = 64;
+
+  function zeros(n) {
+    var a = [];
+    var i;
+    for (i = 0; i < n; i++) a[i] = 0;
+    return a;
+  }
+
+  function regionAppearance(frame, box, y0, y1, xPad) {
+    if (!frame || !box || isCanvasTainted(frame)) return null;
+    var fw = frame.width;
+    var fh = frame.height;
+    var x = Math.max(0, Math.round(box.x * fw));
+    var y = Math.max(0, Math.round(box.y * fh));
+    var w = Math.max(4, Math.round(box.w * fw));
+    var h = Math.max(4, Math.round(box.h * fh));
+    var sx = Math.max(0, Math.round(x + w * (xPad || 0.18)));
+    var sw = Math.max(4, Math.round(w * (1 - 2 * (xPad || 0.18))));
+    var sy = Math.max(0, Math.round(y + h * y0));
+    var sh = Math.max(4, Math.round(h * (y1 - y0)));
+    if (sx + sw > fw) sw = Math.max(4, fw - sx);
+    if (sy + sh > fh) sh = Math.max(4, fh - sy);
+    if (sw < 2 || sh < 2) return null;
+    var data;
+    try { data = frame.getContext("2d").getImageData(sx, sy, sw, sh).data; }
+    catch (err) { return null; }
+    var hist = zeros(HIST_BINS);
+    var rgb = [0, 0, 0];
+    var n = 0;
+    var i, r, g, b, lum;
+    for (i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 16) continue;
+      r = data[i]; g = data[i + 1]; b = data[i + 2];
+      // Skip the blue court so clothing dominates the histogram.
+      if (b > r + 28 && b > g + 18 && b > 90) continue;
+      lum = 0.3 * r + 0.59 * g + 0.11 * b;
+      if (lum < 12 || lum > 250) continue;
+      rgb[0] += r; rgb[1] += g; rgb[2] += b;
+      n += 1;
+      hist[((r >> 6) << 4) + ((g >> 6) << 2) + (b >> 6)] += 1;
+    }
+    if (!n) return { hist: hist, mean: [0, 0, 0], n: 0 };
+    for (i = 0; i < HIST_BINS; i++) hist[i] /= n;
+    return { hist: hist, mean: [rgb[0] / n, rgb[1] / n, rgb[2] / n], n: n };
+  }
+
+  function appearanceOf(frame, box) {
+    if (!frame || !box) return null;
+    return {
+      torso: regionAppearance(frame, box, 0.16, 0.52, 0.18),
+      shorts: regionAppearance(frame, box, 0.48, 0.82, 0.2)
+    };
+  }
+
+  function histL1(a, b) {
+    if (!a || !b) return 1;
+    var s = 0;
+    var i;
+    for (i = 0; i < a.length; i++) s += Math.abs((a[i] || 0) - (b[i] || 0));
+    return s / 2;
+  }
+
+  function meanDist(a, b) {
+    if (!a || !b) return 1;
+    return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) / 441;
+  }
+
+  function appearDist(a, b) {
+    if (!a || !b) return 0.55;
+    var td = a.torso && b.torso ? 0.45 * histL1(a.torso.hist, b.torso.hist) + 0.2 * meanDist(a.torso.mean, b.torso.mean) : 0.35;
+    var sd = a.shorts && b.shorts ? 0.22 * histL1(a.shorts.hist, b.shorts.hist) + 0.13 * meanDist(a.shorts.mean, b.shorts.mean) : 0.2;
+    return td + sd;
+  }
+
+  function mixHist(h1, h2, a) {
+    if (!h1) return h2;
+    if (!h2) return h1;
+    var out = [];
+    var i;
+    for (i = 0; i < h1.length; i++) out[i] = h1[i] * (1 - a) + h2[i] * a;
+    return out;
+  }
+
+  function mixMean(m1, m2, a) {
+    if (!m1) return m2;
+    if (!m2) return m1;
+    return [m1[0] * (1 - a) + m2[0] * a, m1[1] * (1 - a) + m2[1] * a, m1[2] * (1 - a) + m2[2] * a];
+  }
+
+  function mixAppear(oldA, neu, a) {
+    if (!oldA) return neu;
+    if (!neu) return oldA;
+    function mixPart(p1, p2) {
+      if (!p1) return p2;
+      if (!p2) return p1;
+      return { hist: mixHist(p1.hist, p2.hist, a), mean: mixMean(p1.mean, p2.mean, a), n: p2.n || p1.n };
+    }
+    return { torso: mixPart(oldA.torso, neu.torso), shorts: mixPart(oldA.shorts, neu.shorts) };
+  }
+
+  function locateByAppearance(frame, appear, box, pred, court, searchR) {
+    if (!frame || !appear || !box || isCanvasTainted(frame)) return null;
+    var radius = searchR || 0.2;
+    var scales = [1, 1.22, 0.84];
+    var steps = Math.max(7, Math.min(13, Math.round(radius / 0.028) + 5));
+    var best = null;
+    var bestCost = 0.32;
+    var si, iy, ix, scale, w, h, cx, cy, b, ap, cost, dist;
+    var predX = pred && pred.x != null ? pred.x : boxCenter(box).x;
+    var predY = pred && pred.y != null ? pred.y : boxCenter(box).y;
+    var half = court && court.half ? court.half : (court ? sideOf(box, court) : "near");
+    for (si = 0; si < scales.length; si++) {
+      scale = scales[si];
+      w = box.w * scale;
+      h = box.h * scale;
+      for (iy = 0; iy < steps; iy++) {
+        for (ix = 0; ix < steps; ix++) {
+          cx = predX + ((ix / (steps - 1)) - 0.5) * 2 * radius;
+          cy = predY + ((iy / (steps - 1)) - 0.5) * 2 * radius * 0.85;
+          if (cx < w * 0.4 || cx > 1 - w * 0.4 || cy < h * 0.35 || cy > 1 - h * 0.2) continue;
+          b = { x: cx - w / 2, y: cy - h / 2, w: w, h: h };
+          if (court && sideOf(b, court) !== half) continue;
+          ap = appearanceOf(frame, b);
+          if (!ap) continue;
+          var pix = ((ap.torso && ap.torso.n) || 0) + ((ap.shorts && ap.shorts.n) || 0);
+          if (pix < 50) continue;
+          dist = Math.hypot(cx - predX, cy - predY);
+          cost = appearDist(appear, ap) + 0.12 * (dist / Math.max(radius, 0.08));
+          if (cost < bestCost) {
+            bestCost = cost;
+            best = b;
+            best.appear = ap;
+            best.score = Math.max(0, 1 - cost);
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  function enrichBoxes(frame, boxes) {
+    (boxes || []).forEach(function (b) {
+      if (!b.appear) b.appear = appearanceOf(frame, b);
+    });
+    return boxes || [];
+  }
+
+  function footY(b) {
+    return (b.y || 0) + (b.h || 0);
+  }
+
+  function nearScore(b) {
+    // Near players sit lower in the frame and have much bigger boxes.
+    return footY(b) + (b.h || 0) * 0.85;
+  }
+
+  function estimateCourt(boxes, startBox) {
+    var list = (boxes || []).slice();
+    if (startBox && list.indexOf(startBox) === -1) list.push(startBox);
+    list.sort(function (a, b) { return nearScore(b) - nearScore(a); });
+    var start = startBox || list[0];
+    var netY;
+    var nearH;
+    var half;
+    if (list.length >= 4) {
+      var near = list.slice(0, 2);
+      var far = list.slice(list.length - 2);
+      var nearFoot = (footY(near[0]) + footY(near[1])) / 2;
+      var farFoot = (footY(far[0]) + footY(far[1])) / 2;
+      netY = (nearFoot + farFoot) / 2;
+      nearH = (near[0].h + near[1].h) / 2;
+    } else if (list.length >= 2) {
+      netY = (footY(list[0]) + footY(list[list.length - 1])) / 2;
+      nearH = list[0].h;
+    } else if (start) {
+      // Large marked box is a near player: net sits above mid-body, below the head.
+      netY = start.h >= 0.15
+        ? footY(start) - start.h * 0.42
+        : start.y + start.h * 0.22;
+      nearH = start.h;
+    } else {
+      netY = 0.42;
+      nearH = 0.2;
+    }
+    half = start ? (footY(start) >= netY - 0.02 ? "near" : "far") : "near";
+    // If the marked box is clearly large, trust "near".
+    if (start && start.h >= 0.16) half = "near";
+    if (start && start.h <= 0.11 && footY(start) < netY) half = "far";
+    return { netY: netY, half: half, nearH: nearH || (start && start.h) || 0.2 };
+  }
+
+  function sideOf(box, court) {
+    if (!box || !court) return "near";
+    var foot = footY(box);
+    var cy = box.y + box.h / 2;
+    if (foot < court.netY - 0.05) return "far";
+    if (foot > court.netY + 0.04) return "near";
+    if (court.nearH) {
+      if (box.h < court.nearH * 0.62) return "far";
+      if (box.h > court.nearH * 0.82) return "near";
+    }
+    return cy >= court.netY ? "near" : "far";
+  }
+
+  function snapStart(startBox, boxes, court) {
+    if (!startBox) return (boxes && boxes[0]) || null;
+    var c0 = boxCenter(startBox);
+    var startHalf = court ? sideOf(startBox, court) : null;
+    var best = null;
+    var bestD = Infinity;
+    var i, b, c, ratio, d;
+    for (i = 0; i < (boxes || []).length; i++) {
+      b = boxes[i];
+      if (startHalf && sideOf(b, court) !== startHalf) continue;
+      ratio = b.h / Math.max(0.001, startBox.h);
+      if (ratio < 0.6 || ratio > 1.6) continue;
+      c = boxCenter(b);
+      d = Math.hypot(c.x - c0.x, c.y - c0.y);
+      if (d < 0.12 && d < bestD) {
+        bestD = d;
+        best = b;
+      }
+    }
+    return best || startBox;
+  }
+
+  function passesGates(track, det, dt, court) {
+    if (!track || !det) return false;
+    if (sideOf(det, court) !== track.half) return false;
+    var lastH = Math.max(0.001, track.box.h);
+    var ratio = det.h / lastH;
+    if (ratio < 0.6 || ratio > 1.6) return false;
+    var initH = Math.max(0.001, track.initH || lastH);
+    var initRatio = det.h / initH;
+    if (initRatio < 0.5 || initRatio > 1.85) return false;
+    var predX = track.cx + track.vx * dt;
+    var predY = track.cy + track.vy * dt;
+    var c = boxCenter(det);
+    var dist = Math.hypot(c.x - predX, c.y - predY);
+    var maxDist = Math.max(0.07, lastH * 2.2) * Math.max(dt, 0.05) + 0.03;
+    var misses = track.misses || 0;
+    if (misses >= 5) maxDist += Math.min(0.45, (misses - 4) * 0.05);
+    // After ~2s lost, re-acquire anywhere on the same half if size (and appearance) fit.
+    if (misses < 10 && dist > maxDist) return false;
+    if (misses >= 8 && track.appear && det.appear && appearDist(track.appear, det.appear) > 0.4) return false;
+    return true;
+  }
+
+  function pairCost(track, det, dt, court) {
+    if (!passesGates(track, det, dt, court)) return 99;
+    var predX = track.cx + track.vx * dt;
+    var predY = track.cy + track.vy * dt;
+    var c = boxCenter(det);
+    var dist = Math.hypot(c.x - predX, c.y - predY);
+    var sizePen = Math.abs(1 - det.h / Math.max(0.001, track.box.h));
+    var ad = appearDist(track.appear, det.appear);
+    return (dist / Math.max(0.04, track.box.h)) * 0.48 + sizePen * 0.2 + ad * 0.32;
+  }
+
+  function minCostAssign(cost) {
+    var n = cost.length;
+    var m = n && cost[0] ? cost[0].length : 0;
+    var bestMap = [];
+    var best = Infinity;
+    var used = zeros(m);
+    var map = [];
+    var i;
+    for (i = 0; i < n; i++) map[i] = -1;
+
+    function rec(t, acc) {
+      if (acc >= best) return;
+      if (t === n) {
+        best = acc;
+        bestMap = map.slice();
+        return;
+      }
+      var d;
+      var matched = false;
+      for (d = 0; d < m; d++) {
+        if (used[d] || cost[t][d] >= 90) continue;
+        used[d] = 1;
+        map[t] = d;
+        rec(t + 1, acc + cost[t][d]);
+        used[d] = 0;
+        map[t] = -1;
+        matched = true;
+      }
+      map[t] = -1;
+      rec(t + 1, acc + UNMATCHED_COST);
+    }
+    rec(0, 0);
+    return bestMap.length ? bestMap : map;
+  }
+
+  function makeTrack(box, court, isTarget) {
+    var c = boxCenter(box);
+    return {
+      box: box,
+      cx: c.x,
+      cy: c.y,
+      vx: 0,
+      vy: 0,
+      initH: box.h,
+      half: sideOf(box, court),
+      appear: box.appear || null,
+      target: !!isTarget,
+      misses: 0
+    };
+  }
+
+  function seedTracks(boxes, startBox, court) {
+    var list = (boxes || []).slice();
+    var target = startBox ? (snapStart(startBox, list, court) || startBox) : (list[0] || startBox);
+    if (target && list.indexOf(target) === -1) list = [target].concat(list);
+    list.sort(function (a, b) { return nearScore(b) - nearScore(a); });
+    // Keep at most 4 people, always including the marked one.
+    var picked = [];
+    var i;
+    if (target) picked.push(target);
+    for (i = 0; i < list.length && picked.length < 4; i++) {
+      if (picked.indexOf(list[i]) === -1) picked.push(list[i]);
+    }
+    return picked.map(function (b) {
+      return makeTrack(b, court, b === target);
+    });
+  }
+
+  function updateTrack(track, det, dt, court) {
+    var prev = boxCenter(track.box);
+    var c = boxCenter(det);
+    var smooth = 0.35;
+    track.vx = (1 - smooth) * track.vx + smooth * ((c.x - prev.x) / Math.max(dt, 0.05));
+    track.vy = (1 - smooth) * track.vy + smooth * ((c.y - prev.y) / Math.max(dt, 0.05));
+    // Clamp velocity so a bad frame cannot sling the predictor over the net.
+    var vmax = Math.max(0.15, track.box.h * 2.5);
+    if (Math.hypot(track.vx, track.vy) > vmax) {
+      var s = vmax / Math.hypot(track.vx, track.vy);
+      track.vx *= s;
+      track.vy *= s;
+    }
+    track.box = det;
+    track.cx = c.x;
+    track.cy = c.y;
+    track.misses = 0;
+    if (det.appear) track.appear = mixAppear(track.appear, det.appear, 0.08);
+  }
+
+  function holdTrack(track, dt) {
+    var decay = 0.45;
+    track.vx *= decay;
+    track.vy *= decay;
+    track.cx += track.vx * dt * 0.3;
+    track.cy += track.vy * dt * 0.3;
+    track.box = {
+      x: track.cx - track.box.w / 2,
+      y: track.cy - track.box.h / 2,
+      w: track.box.w,
+      h: track.box.h,
+      color: track.box.color,
+      appear: track.appear
+    };
+    track.misses += 1;
+  }
+
+
   function matchBox(prev, boxes, dt, vel) {
     if (!prev || !boxes || !boxes.length) return null;
     var cx = prev.x + prev.w / 2 + (vel ? vel.x * dt : 0);
@@ -536,6 +919,10 @@
     var template = null;
     var pred = startBox ? boxCenter(startBox) : { x: 0.5, y: 0.5 };
     var useDetect = !!MODEL && !detectorFailed;
+    var courtHint = startBox ? estimateCourt([], startBox) : null;
+    if (startBox && courtHint) courtHint.half = sideOf(startBox, courtHint);
+    var targetAppear = startBox && startBox.appear ? startBox.appear : null;
+    var visualMisses = 0;
     video.muted = true;
     video.pause();
     function capture(actual) {
@@ -546,16 +933,49 @@
         samples.push({ t: actual, boxes: [], tmpl: null, tainted: true });
         return Promise.resolve(samples);
       }
+      if (startBox && !startBox.appear) {
+        startBox.appear = appearanceOf(frame, startBox);
+        if (startBox.appear && !targetAppear) targetAppear = startBox.appear;
+      }
       if (!template && startBox) template = makeTemplate(frame, startBox);
       var detectPromise = useDetect ? detectPeople(video).catch(function () { return []; }) : Promise.resolve([]);
       return detectPromise.then(function (boxes) {
-        var tmpl = template ? matchTemplate(frame, template, pred.x, pred.y, 0.16) : null;
-        if (tmpl) pred = boxCenter(tmpl);
-        else if (boxes && boxes.length && startBox) {
-          var m = matchBox(startBox, boxes, step, null);
-          if (m) pred = boxCenter(m);
+        boxes = enrichBoxes(frame, boxes || []);
+        var searchR = Math.min(0.5, 0.14 + visualMisses * 0.06);
+        var tmpl = template ? matchTemplate(frame, template, pred.x, pred.y, Math.min(searchR, 0.36)) : null;
+        var visual = null;
+        if ((!tmpl || (tmpl.score || 0) < 0.5) && targetAppear && startBox) {
+          visual = locateByAppearance(frame, targetAppear, startBox, pred, courtHint, searchR);
         }
-        samples.push({ t: actual, boxes: boxes || [], tmpl: tmpl, tainted: false });
+        function isStrongLocal(hit) {
+          if (!hit) return false;
+          if (hit.appear) {
+            var pix = ((hit.appear.torso && hit.appear.torso.n) || 0) + ((hit.appear.shorts && hit.appear.shorts.n) || 0);
+            if (pix < 50) return false;
+          }
+          return (hit.score || 0) >= 0.55;
+        }
+        var local = (visual && tmpl)
+          ? ((visual.score || 0) >= (tmpl.score || 0) ? visual : tmpl)
+          : (visual || tmpl);
+        if (local && !isStrongLocal(local)) local = null;
+        if (local) {
+          pred = boxCenter(local);
+          visualMisses = 0;
+          if (local.appear) targetAppear = mixAppear(targetAppear, local.appear, 0.06);
+        } else if (boxes && boxes.length && startBox && courtHint) {
+          var snapped = snapStart(startBox, boxes, courtHint);
+          if (snapped && snapped !== startBox) {
+            pred = boxCenter(snapped);
+            visualMisses = 0;
+            local = snapped;
+          } else {
+            visualMisses += 1;
+          }
+        } else {
+          visualMisses += 1;
+        }
+        samples.push({ t: actual, boxes: boxes || [], tmpl: local, tainted: false });
         if (onProgress) {
           var ratio = duration ? Math.min(1, (actual + step) / duration) : 0;
           onProgress(ratio, samples.length);
@@ -579,89 +999,103 @@
   }
 
   function associate(samples, startBox, t0, aspect) {
-    if (!samples.length) return [];
+    if (!samples.length) return { keys: [], court: null, startBox: startBox };
     var closest = 0;
     var bestDt = Infinity;
     var i;
     for (i = 0; i < samples.length; i++) {
-      var dt = Math.abs(samples[i].t - t0);
-      if (dt < bestDt) {
-        bestDt = dt;
+      var dt0 = Math.abs(samples[i].t - t0);
+      if (dt0 < bestDt) {
+        bestDt = dt0;
         closest = i;
       }
     }
     var sample0 = samples[closest];
-    var boxes0 = sample0.boxes || [];
-    var current = matchBox(startBox, boxes0, 0, null) || sample0.tmpl || startBox;
+    var boxes0 = (sample0.boxes || []).slice();
+    if (sample0.tmpl) boxes0 = boxes0.concat([sample0.tmpl]);
+    var courtGuess = estimateCourt(boxes0, startBox);
+    var seedBox = snapStart(startBox, boxes0, courtGuess) || startBox || sample0.tmpl;
+    if (!seedBox) seedBox = startBox;
+    var court = estimateCourt(boxes0, seedBox);
+    if (seedBox) court.half = sideOf(seedBox, court);
+    var tracks = seedTracks(boxes0, seedBox, court);
+    var target = null;
+    for (i = 0; i < tracks.length; i++) if (tracks[i].target) target = tracks[i];
+    if (!target && tracks.length) {
+      tracks[0].target = true;
+      target = tracks[0];
+    }
     var keyframes = [];
-    var vel = { x: 0, y: 0 };
-    var misses = 0;
 
     function emit(sample, box, held) {
       var pt = pointFromBox(box, aspect);
       keyframes.push({ t: sample.t, x: pt.x, y: pt.y, r: pt.r, c: held ? 0 : 1, box: box });
     }
 
-    emit(samples[closest], current, false);
-
-    function acceptTemplate(prevBox, tmpl) {
-      if (!tmpl) return null;
-      var pc = boxCenter(prevBox);
-      var tc = boxCenter(tmpl);
-      var dist = Math.hypot(tc.x - pc.x, tc.y - pc.y);
-      if (dist > 0.24) return null;
-      return tmpl;
-    }
-
-    function walk(from, to, dir) {
-      var prevBox = current;
-      var prevT = samples[from].t;
-      var prevVel = { x: vel.x * dir, y: vel.y * dir };
-      var idx;
-      for (idx = from + dir; dir > 0 ? idx <= to : idx >= to; idx += dir) {
-        var sample = samples[idx];
-        var dt = Math.abs(sample.t - prevT) || DEFAULT_INTERVAL;
-        var matched = matchBox(prevBox, sample.boxes || [], dt, prevVel);
-        if (!matched) matched = acceptTemplate(prevBox, sample.tmpl);
-        if (matched) {
-          var pc = boxCenter(prevBox);
-          var mc = boxCenter(matched);
-          prevVel = { x: (mc.x - pc.x) / dt, y: (mc.y - pc.y) / dt };
-          prevBox = matched;
-          prevT = sample.t;
-          misses = 0;
-          emit(sample, matched, false);
+    function stepTracks(sample, prevT) {
+      var dt = Math.abs(sample.t - prevT) || DEFAULT_INTERVAL;
+      var dets = (sample.boxes || []).slice();
+      if (sample.tmpl) dets.push(sample.tmpl);
+      var cost = tracks.map(function (tr) {
+        return dets.map(function (det) { return pairCost(tr, det, dt, court); });
+      });
+      var assign = cost.length ? minCostAssign(cost) : [];
+      var used = {};
+      var t;
+      for (t = 0; t < tracks.length; t++) {
+        var di = assign[t];
+        var tr = tracks[t];
+        if (typeof di === "number" && di >= 0 && !used[di] && dets[di] && cost[t][di] < 90) {
+          used[di] = true;
+          updateTrack(tr, dets[di], dt, court);
         } else {
-          misses += 1;
-          if (misses <= 2) {
-            var held = {
-              x: prevBox.x + prevVel.x * dt * 0.4,
-              y: prevBox.y + prevVel.y * dt * 0.4,
-              w: prevBox.w,
-              h: prevBox.h,
-              color: prevBox.color
-            };
-            prevVel = { x: prevVel.x * 0.4, y: prevVel.y * 0.4 };
-            prevBox = held;
-            prevT = sample.t;
-            emit(sample, held, true);
-          } else {
-            emit(sample, prevBox, true);
-            prevT = sample.t;
-          }
+          // Never re-acquire a leftover detection that fails half/size/motion gates.
+          holdTrack(tr, dt);
         }
       }
     }
 
-    var startBoxRef = current;
+    if (target) emit(sample0, target.box, false);
+
+    function cloneTracks(list) {
+      return list.map(function (tr) {
+        return {
+          box: tr.box,
+          cx: tr.cx,
+          cy: tr.cy,
+          vx: 0,
+          vy: 0,
+          initH: tr.initH,
+          half: tr.half,
+          appear: tr.appear,
+          target: tr.target,
+          misses: 0
+        };
+      });
+    }
+
+    function walk(from, to, dir) {
+      var prevT = samples[from].t;
+      var idx;
+      for (idx = from + dir; dir > 0 ? idx <= to : idx >= to; idx += dir) {
+        var sample = samples[idx];
+        stepTracks(sample, prevT);
+        prevT = sample.t;
+        var tgt = null;
+        var t;
+        for (t = 0; t < tracks.length; t++) if (tracks[t].target) tgt = tracks[t];
+        if (tgt) emit(sample, tgt.box, tgt.misses > 0);
+      }
+    }
+
+    var origin = cloneTracks(tracks);
+    tracks = cloneTracks(origin);
     walk(closest, samples.length - 1, 1);
-    current = startBoxRef;
-    vel = { x: 0, y: 0 };
-    misses = 0;
+    tracks = cloneTracks(origin);
     walk(closest, 0, -1);
 
     keyframes.sort(function (a, b) { return a.t - b.t; });
-    return keyframes;
+    return { keys: keyframes, court: court, startBox: seedBox };
   }
 
   function videoAspect(video) {
@@ -685,18 +1119,22 @@
         err.code = "tainted";
         throw err;
       }
-      var keys = associate(samples, startBox, t0, aspect);
+      var assoc = associate(samples, startBox, t0, aspect);
+      var keys = assoc.keys || assoc;
       var detected = 0;
       var i;
       for (i = 0; i < keys.length; i++) if (keys[i].c) detected += 1;
       var duration = video.duration || (keys.length ? keys[keys.length - 1].t : 0);
       return {
-        v: 1,
+        v: TRACK_VERSION,
         duration: duration,
         aspect: aspect,
         hold: HOLD_SEC,
         detected: detected,
         samples: samples.length,
+        startBox: assoc.startBox || startBox,
+        t0: t0,
+        court: assoc.court || null,
         k: keys
       };
     });
@@ -711,11 +1149,11 @@
   function pack(track) {
     if (!track) return null;
     if (track.m && !track.k) {
-      return { v: 1, d: q(track.duration || 0, 100), h: q(track.hold || HOLD_SEC, 100), m: [q(track.m[0], 1000, true), q(track.m[1], 1000, true), q(track.m[2], 1000, true)] };
+      return { v: track.v || TRACK_VERSION, d: q(track.duration || 0, 100), h: q(track.hold || HOLD_SEC, 100), m: [q(track.m[0], 1000, true), q(track.m[1], 1000, true), q(track.m[2], 1000, true)] };
     }
     var keys = track.k || [];
     var packed = {
-      v: 1,
+      v: track.v || TRACK_VERSION,
       d: q(track.duration || 0, 100),
       a: q(track.aspect || 0.56, 1000, true),
       h: q(track.hold || HOLD_SEC, 100),
@@ -723,6 +1161,16 @@
         return [q(k.t, 100), q(k.x, 1000, true), q(k.y, 1000, true), q(k.r, 1000, true), k.c ? 1 : 0];
       })
     };
+    if (track.startBox) {
+      packed.s = [
+        q(track.startBox.x, 1000, true),
+        q(track.startBox.y, 1000, true),
+        q(track.startBox.w, 1000, true),
+        q(track.startBox.h, 1000, true)
+      ];
+    }
+    if (typeof track.t0 === "number") packed.t0 = q(track.t0, 100);
+    if (track.court && typeof track.court.netY === "number") packed.n = q(track.court.netY, 1000, true);
     return packed;
   }
 
@@ -733,7 +1181,7 @@
     }
     if (obj.m && !obj.k) {
       return {
-        v: 1,
+        v: obj.v || 1,
         duration: (obj.d || 0) / 100,
         hold: (obj.h || HOLD_SEC * 100) / 100,
         m: [(obj.m[0] || 0) / 1000, (obj.m[1] || 0) / 1000, (obj.m[2] || DEFAULT_R * 1000) / 1000],
@@ -743,11 +1191,18 @@
     var keys = (obj.k || []).map(function (k) {
       return { t: (k[0] || 0) / 100, x: (k[1] || 0) / 1000, y: (k[2] || 0) / 1000, r: (k[3] || 0) / 1000, c: k[4] ? 1 : 0 };
     });
+    var startBox = null;
+    if (obj.s && obj.s.length >= 4) {
+      startBox = { x: (obj.s[0] || 0) / 1000, y: (obj.s[1] || 0) / 1000, w: (obj.s[2] || 0) / 1000, h: (obj.s[3] || 0) / 1000 };
+    }
     return {
-      v: 1,
+      v: obj.v || 1,
       duration: (obj.d || 0) / 100,
       aspect: (obj.a || 560) / 1000,
       hold: (obj.h || HOLD_SEC * 100) / 100,
+      startBox: startBox,
+      t0: typeof obj.t0 === "number" ? obj.t0 / 100 : 0,
+      court: typeof obj.n === "number" ? { netY: obj.n / 1000 } : null,
       k: keys
     };
   }
@@ -838,6 +1293,37 @@
   }
 
 
+  function startBoxFromTrack(track) {
+    if (!track) return null;
+    if (track.startBox && track.startBox.w > 0 && track.startBox.h > 0) return track.startBox;
+    var keys = track.k || [];
+    if (!keys.length) {
+      if (track.m && track.m.length >= 2) {
+        var rs = track.m[2] || DEFAULT_R;
+        return { x: Math.max(0, track.m[0] - rs), y: Math.max(0, track.m[1] - rs), w: rs * 2, h: rs * 2 };
+      }
+      return null;
+    }
+    var k = keys[0];
+    var aspect = track.aspect || 0.56;
+    var r = Math.max(0.05, k.r || DEFAULT_R);
+    var kRatio = 2.4;
+    var factor = 0.55 * Math.sqrt(1 + (kRatio * aspect) * (kRatio * aspect));
+    var w = r / Math.max(0.2, factor);
+    var h = w * kRatio;
+    var cy = k.y + h * 0.06;
+    return {
+      x: Math.max(0, k.x - w / 2),
+      y: Math.max(0, cy - h / 2),
+      w: w,
+      h: h
+    };
+  }
+
+  function isCurrentTrack(track) {
+    return !!(track && (track.v || 1) >= TRACK_VERSION);
+  }
+
   function isUsefulTrack(track) {
     if (!track) return false;
     if (track.m && (!track.k || !track.k.length)) return true;
@@ -876,6 +1362,9 @@
     boxCenter: boxCenter,
     defaultRadius: defaultRadius,
     isUsefulTrack: isUsefulTrack,
+    isCurrentTrack: isCurrentTrack,
+    startBoxFromTrack: startBoxFromTrack,
+    TRACK_VERSION: TRACK_VERSION,
     fetchTrack: fetchTrack,
     isCanvasTainted: isCanvasTainted,
     getDetectorState: getDetectorState,

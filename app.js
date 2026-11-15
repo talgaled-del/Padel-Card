@@ -830,6 +830,7 @@
   }
 
   function renderVideoList(targetId, videos, editable) {
+    if (editable) refreshStaleOwnerTracks();
     var box = $(targetId);
     if (!box) return;
     if (!videos || !videos.length) { box.innerHTML = ""; return; }
@@ -1492,6 +1493,81 @@
     renderVideoList("video-list", state.videos, true);
   }
 
+  var staleRefreshInFlight = {};
+
+  function unpackTrack(track) {
+    if (!track || !window.PadelTrack) return track || null;
+    return PadelTrack.unpack(track) || track;
+  }
+
+  function maybeRefreshStaleTrack(v) {
+    if (!v || staleRefreshInFlight[v.id]) return Promise.resolve(null);
+    if (!window.PadelTrack || !PadelTrack.isCurrentTrack) return Promise.resolve(null);
+    var src = playableCloudinaryUrl(v.link || "") || v.objectUrl || v.link || "";
+    if (!isDirectVideo(src)) return Promise.resolve(null);
+
+    function recompute(unpacked) {
+      if (!unpacked || PadelTrack.isCurrentTrack(unpacked)) return Promise.resolve(null);
+      var startBox = PadelTrack.startBoxFromTrack && PadelTrack.startBoxFromTrack(unpacked);
+      if (!startBox) return Promise.resolve(null);
+      staleRefreshInFlight[v.id] = true;
+      var video = document.createElement("video");
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+      video.setAttribute("playsinline", "");
+      video.preload = "auto";
+      video.crossOrigin = "anonymous";
+      video.src = src;
+      video.style.position = "fixed";
+      video.style.left = "-9999px";
+      video.style.width = "4px";
+      video.style.height = "4px";
+      document.body.appendChild(video);
+      var t0 = typeof unpacked.t0 === "number" ? unpacked.t0 : ((unpacked.k && unpacked.k[0] && unpacked.k[0].t) || 0);
+      return waitForVideoFrame(video, "", true).then(function () {
+        return PadelTrack.trackPlayer(video, startBox, { t0: t0, interval: 0.2 });
+      }).then(function (track) {
+        if (!track || !PadelTrack.isUsefulTrack(track)) throw new Error("track-useless");
+        var packed = PadelTrack.pack(track);
+        return uploadTrackJson(packed).then(function (res) {
+          applyTrackToVideo(v, track, res.secure_url || "");
+          return track;
+        }, function () {
+          applyTrackToVideo(v, track, v.trackUrl || "");
+          return track;
+        });
+      }).catch(function () {
+        return null;
+      }).then(function (track) {
+        staleRefreshInFlight[v.id] = false;
+        try { video.removeAttribute("src"); video.load(); video.remove(); } catch (err) {}
+        return track;
+      });
+    }
+
+    if (v.track) return recompute(unpackTrack(v.track));
+    if (v.trackUrl) {
+      staleRefreshInFlight[v.id] = true;
+      return PadelTrack.fetchTrack(v.trackUrl).then(function (tr) {
+        staleRefreshInFlight[v.id] = false;
+        if (tr && !v.track) v.track = PadelTrack.pack(tr);
+        return recompute(tr);
+      }).catch(function () {
+        staleRefreshInFlight[v.id] = false;
+        return null;
+      });
+    }
+    return Promise.resolve(null);
+  }
+
+  function refreshStaleOwnerTracks() {
+    if (!state.profile || !state.profile.id) return;
+    var list = state.videos || [];
+    var i;
+    for (i = 0; i < list.length; i++) maybeRefreshStaleTrack(list[i]);
+  }
+
   function finishPickerWithStatic(v, reason) {
     var sel = pickerState.selected;
     if (!sel) {
@@ -1527,7 +1603,7 @@
     var t0 = video.currentTime || 0;
     return PadelTrack.trackPlayer(video, startBox, {
       t0: t0,
-      interval: 0.28,
+      interval: 0.2,
       onProgress: function (ratio) {
         setTrackProgress(true, ratio, "מזהה את השחקן בסרטון… " + Math.round(ratio * 100) + "%");
       },
@@ -1848,6 +1924,21 @@
       playerState.track = track;
       setPlayerHint(track);
       drawPlayerOverlay();
+      var rec = (state.videos || []).find(function (x) {
+        if (!x) return false;
+        if (opts.trackUrl && x.trackUrl === opts.trackUrl) return true;
+        var link = playableCloudinaryUrl(x.link || "") || x.link || x.objectUrl || "";
+        return !!(link && src && link === src);
+      });
+      if (rec && state.profile) {
+        maybeRefreshStaleTrack(rec).then(function (fresh) {
+          if (fresh && playerState.src === src) {
+            playerState.track = fresh;
+            setPlayerHint(fresh);
+            drawPlayerOverlay();
+          }
+        });
+      }
     });
     waitForVideoFrame(video, "", true).then(function () {
       drawPlayerOverlay();

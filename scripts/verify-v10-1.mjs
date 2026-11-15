@@ -98,8 +98,8 @@ const assetHrefs = await page.evaluate(() => ({
   css: [...document.querySelectorAll("link[rel=stylesheet]")].map((el) => el.getAttribute("href"))
 }));
 console.log("ASSETS", assetHrefs);
-assert(assetHrefs.scripts.some((s) => s.startsWith("v10-1/")), "page loads scripts from v10-1/");
-assert(assetHrefs.css.some((s) => s && s.startsWith("v10-1/")), "page loads CSS from v10-1/");
+assert(assetHrefs.scripts.some((s) => s.startsWith("v10-2/")), "page loads scripts from v10-2/");
+assert(assetHrefs.css.some((s) => s && s.startsWith("v10-2/")), "page loads CSS from v10-2/");
 
 // Tap target is the file input itself; nothing covers the upload control
 await page.locator('label.upload[for="video-file"]').scrollIntoViewIfNeeded();
