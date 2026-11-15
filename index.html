@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v10/styles.css" />
-  <link rel="stylesheet" href="v10/cards.css" />
+  <link rel="stylesheet" href="v10-1/styles.css" />
+  <link rel="stylesheet" href="v10-1/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -253,7 +253,7 @@
           <span class="legend">סרטוני משחק</span>
           <p class="note">העלו סרטון משחק מהגלריה או מהמצלמה (עד 3 סרטונים, עד 100MB ו־3 דקות לכל אחד). אחרי ההעלאה תתבקשו לסמן את עצמכם בסרטון, כדי שהמארגן יידע על מי להתמקד. אפשר גם להוסיף קישור חיצוני.</p>
           <label class="upload" for="video-file">
-            <input id="video-file" type="file" accept="video/*" multiple />
+            <input id="video-file" type="file" accept="video/*,video/quicktime,video/mp4,.mov,.mp4,.m4v,.hevc,.MOV,.MP4,.M4V" multiple />
             <strong>העלאת סרטון מהמכשיר</strong>
             <span class="note">נפתח הגלריה או המצלמה בטלפון · עד 3 סרטונים</span>
           </label>
@@ -389,9 +389,9 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
-  <script src="v10/quiz.js"></script>
-  <script src="v10/players.js"></script>
-  <script src="v10/track.js"></script>
-  <script src="v10/app.js"></script>
+  <script src="v10-1/quiz.js"></script>
+  <script src="v10-1/players.js"></script>
+  <script src="v10-1/track.js"></script>
+  <script src="v10-1/app.js"></script>
 </body>
 </html>

@@ -900,23 +900,74 @@
     if (text) text.textContent = label || "מעלה את הסרטון…";
   }
 
+  var VIDEO_EXTS = /\.(mov|mp4|m4v|hevc|qt|webm|avi)$/i;
+
+  function isVideoFile(file) {
+    if (!file) return false;
+    var type = String(file.type || "").toLowerCase();
+    var name = String(file.name || "");
+    if (VIDEO_EXTS.test(name)) return true;
+    if (type.indexOf("video/") === 0) return true;
+    // iOS often leaves type empty or uses a generic octet-stream for .mov/HEVC.
+    if (!type || type === "application/octet-stream") return true;
+    return false;
+  }
+
   function readVideoDuration(file) {
-    return new Promise(function (resolve, reject) {
+    return new Promise(function (resolve) {
+      if (window.__padelForceUnknownDuration) {
+        resolve(NaN);
+        return;
+      }
       var url = URL.createObjectURL(file);
       var el = document.createElement("video");
+      el.muted = true;
+      el.defaultMuted = true;
+      el.playsInline = true;
+      el.setAttribute("muted", "");
+      el.setAttribute("playsinline", "");
+      el.setAttribute("webkit-playsinline", "");
       el.preload = "metadata";
+      el.setAttribute("preload", "metadata");
+      el.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-99px;top:-99px;";
       var done = false;
-      var finish = function (fn, val) {
+      var finish = function (val) {
         if (done) return;
         done = true;
+        try { el.removeAttribute("src"); el.load(); } catch (err) {}
+        try { if (el.parentNode) el.parentNode.removeChild(el); } catch (err) {}
         URL.revokeObjectURL(url);
-        fn(val);
+        resolve(val);
       };
-      el.onloadedmetadata = function () { finish(resolve, el.duration); };
-      el.onerror = function () { finish(reject, new Error("meta")); };
-      setTimeout(function () { finish(reject, new Error("meta-timeout")); }, 8000);
+      var onMeta = function () {
+        var d = el.duration;
+        if (isFinite(d) && d > 0) finish(d);
+      };
+      el.addEventListener("loadedmetadata", onMeta);
+      el.addEventListener("durationchange", onMeta);
+      el.addEventListener("loadeddata", onMeta);
+      el.addEventListener("error", function () { finish(NaN); });
+      var wait = 5000;
+      try {
+        if (typeof window.__padelVideoMetaTimeoutMs === "number") wait = window.__padelVideoMetaTimeoutMs;
+      } catch (err) {}
+      setTimeout(function () { finish(NaN); }, wait);
+      try { document.body.appendChild(el); } catch (err) {}
       el.src = url;
+      try { el.load(); } catch (err) {}
     });
+  }
+
+  function uploadErrorMessage(err) {
+    var raw = String((err && err.message) || err || "");
+    var m = raw.toLowerCase();
+    if (/file size too large|maximum is|too large|file size/.test(m)) {
+      return "הקובץ גדול מדי. הגודל המרבי בתוכנית החינמית הוא 100MB";
+    }
+    if (/timeout/.test(m)) return "ההעלאה ארכה יותר מדי. בדקו את החיבור ונסו שוב";
+    if (/network/.test(m)) return "אין חיבור לרשת. בדקו את החיבור ונסו שוב";
+    if (raw && raw !== "upload" && raw !== "parse") return "ההעלאה נכשלה: " + raw;
+    return "ההעלאה נכשלה. נסו שוב";
   }
 
   function uploadToCloudinary(file, onProgress, opts) {
@@ -960,22 +1011,28 @@
       showToast("אפשר להוסיף עד 3 סרטונים לכרטיס");
       return Promise.resolve();
     }
-    if (file.type && file.type.indexOf("video/") !== 0) {
-      showToast("יש לבחור קובץ וידאו");
+    if (!isVideoFile(file)) {
+      showToast("יש לבחור קובץ וידאו (MP4 או MOV)");
       return Promise.resolve();
     }
     if (file.size > CLOUDINARY.maxBytes) {
       showToast("הקובץ גדול מדי. הגודל המרבי הוא 100MB");
       return Promise.resolve();
     }
+    // Immediate feedback so the tap never looks dead on iOS, even while
+    // metadata is still pending (or never arrives).
+    setUploadProgress(true, 0.05, "מכין את הסרטון…");
     return readVideoDuration(file).then(function (duration) {
       if (isFinite(duration) && duration > CLOUDINARY.maxDuration) {
-        showToast("משך הסרטון ארוך מדי. המקסימום הוא 3 דקות");
-        return;
+        showToast("הסרטון ארוך מ־3 דקות, אבל נמשיך להעלות");
       }
       return startCloudinaryUpload(file, duration);
     }, function () {
-      showToast("לא ניתן לקרוא את משך הסרטון. נסו קובץ אחר");
+      // Never block the upload if duration cannot be read (common on iOS).
+      return startCloudinaryUpload(file, 0);
+    }).catch(function (err) {
+      setUploadProgress(false, 0);
+      showToast(uploadErrorMessage(err));
     });
   }
 
@@ -1002,13 +1059,17 @@
       persist();
       renderVideoList("video-list", state.videos, true);
       setUploadProgress(false, 0);
-      showToast("הסרטון הועלה לכרטיס");
+      if (isFinite(temp.duration) && temp.duration > CLOUDINARY.maxDuration) {
+        showToast("הסרטון ארוך מ־3 דקות, אך נשמר בכרטיס");
+      } else {
+        showToast("הסרטון הועלה לכרטיס");
+      }
       return openTrackPicker(temp);
     }, function (err) {
       state.videos = state.videos.filter(function (x) { return x.id !== id; });
       renderVideoList("video-list", state.videos, true);
       setUploadProgress(false, 0);
-      showToast("ההעלאה נכשלה. נסו שוב");
+      showToast(uploadErrorMessage(err));
       console.warn("cloudinary upload failed", err);
     });
   }
@@ -2630,29 +2691,16 @@
     });
     $("goto-profile").addEventListener("click", function () { go("profile"); });
     $("profile-form").addEventListener("submit", saveProfile);
-    function armFilePicker(input) {
-      if (!input) return;
-      var label = input.closest("label");
-      if (!label) return;
-      label.addEventListener("click", function (ev) {
-        if (ev.target === input) return;
-        ev.preventDefault();
-        try { input.click(); } catch (err) {}
-      });
-    }
+    // The transparent <input type=file> already covers its <label>.
+    // Do not call input.click() from a label handler: when the tap already
+    // hit the input (always, with the overlay), a second programmatic click
+    // can open then immediately cancel the iOS picker.
     $("video-file").addEventListener("change", function (ev) {
-      addVideoFiles(ev.target.files);
+      // Copy off the live FileList before resetting the input — clearing
+      // value empties the live list, which would drop the chosen files.
+      var files = ev.target.files ? Array.from(ev.target.files) : [];
       ev.target.value = "";
-    });
-    armFilePicker($("video-file"));
-    armFilePicker($("photo-file"));
-    document.addEventListener("click", function (ev) {
-      var label = ev.target && ev.target.closest && ev.target.closest("#card-photo-upload-label");
-      if (!label) return;
-      var input = $("card-photo-file");
-      if (!input || ev.target === input) return;
-      ev.preventDefault();
-      try { input.click(); } catch (err) {}
+      addVideoFiles(files);
     });
     $("add-link").addEventListener("click", addVideoLink);
     $("add-court").addEventListener("click", addCourt);
