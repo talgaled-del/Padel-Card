@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="styles.css?v=8" />
-  <link rel="stylesheet" href="cards.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=9" />
+  <link rel="stylesheet" href="cards.css?v=9" />
 </head>
 <body>
   <div id="app">
@@ -117,7 +117,7 @@
               <span id="photo-fallback">+</span>
             </div>
             <div class="photo-actions">
-              <label class="upload compact">
+              <label class="upload compact" for="photo-file">
                 <input id="photo-file" type="file" accept="image/*,.heic,.heif,image/jpeg,image/png,image/webp" />
                 <strong>העלאת תמונה</strong>
               </label>
@@ -204,8 +204,8 @@
           <div class="seg">
             <label><input type="radio" name="tenure" value="under1" /> פחות משנה</label>
             <label><input type="radio" name="tenure" value="1-2" /> 1–2 שנים</label>
-            <label><input type="radio" name="tenure" value="3-5" /> 3–5</label>
-            <label><input type="radio" name="tenure" value="5plus" /> 5+</label>
+            <label><input type="radio" name="tenure" value="2-3" /> 2–3 שנים</label>
+            <label><input type="radio" name="tenure" value="3plus" /> מעל 3 שנים</label>
           </div>
         </fieldset>
         <fieldset class="field" style="border:0;padding:0;margin:0">
@@ -217,12 +217,13 @@
           </div>
         </fieldset>
         <fieldset class="field" style="border:0;padding:0;margin:0">
-          <legend class="legend">מכה חזקה <span class="opt">לא חובה, אפשר כמה</span></legend>
+          <legend class="legend">חוזקות <span class="opt">לא חובה, אפשר כמה</span></legend>
           <div class="chip-seg" id="shots-seg">
             <label><input type="checkbox" name="shots" value="bandeja" /> בנדחה</label>
             <label><input type="checkbox" name="shots" value="vibora" /> ויבורה</label>
             <label><input type="checkbox" name="shots" value="smash" /> סמאש</label>
-            <label><input type="checkbox" name="shots" value="volley" /> וולה/רשת</label>
+            <label><input type="checkbox" name="shots" value="kicksmash" /> קיק סמאש</label>
+            <label><input type="checkbox" name="shots" value="volley" /> וולי/רשת</label>
             <label><input type="checkbox" name="shots" value="lob" /> לוב</label>
             <label><input type="checkbox" name="shots" value="walls" /> משחק קירות</label>
             <label><input type="checkbox" name="shots" value="defense" /> הגנה</label>
@@ -245,7 +246,7 @@
         <div class="field">
           <span class="legend">סרטוני משחק</span>
           <p class="note">העלו סרטון משחק מהגלריה או מהמצלמה (עד 3 סרטונים, עד 100MB ו־3 דקות לכל אחד). אחרי ההעלאה תתבקשו לסמן את עצמכם בסרטון, כדי שהמארגן יידע על מי להתמקד. אפשר גם להוסיף קישור חיצוני.</p>
-          <label class="upload">
+          <label class="upload" for="video-file">
             <input id="video-file" type="file" accept="video/*" multiple />
             <strong>העלאת סרטון מהמכשיר</strong>
             <span class="note">נפתח הגלריה או המצלמה בטלפון · עד 3 סרטונים</span>
@@ -374,9 +375,9 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
-  <script src="quiz.js?v=8"></script>
-  <script src="players.js?v=8"></script>
-  <script src="track.js?v=8"></script>
-  <script src="app.js?v=8"></script>
+  <script src="quiz.js?v=9"></script>
+  <script src="players.js?v=9"></script>
+  <script src="track.js?v=9"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

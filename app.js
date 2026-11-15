@@ -61,6 +61,7 @@
       state.answers = data.answers || [];
       state.photo = (data.profile && data.profile.photo) || data.photo || null;
       state.partnerId = (data.profile && data.profile.partnerId) || data.partnerId || null;
+      if (state.profile) state.profile.tenure = normalizeTenure(state.profile.tenure || "");
       state.videos = (data.videos || []).map(function (v) {
         return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
       });
@@ -116,7 +117,7 @@
       region: state.profile.region || "",
       courts: state.profile.courts || [],
       frequency: state.profile.frequency || "",
-      tenure: state.profile.tenure || "",
+      tenure: normalizeTenure(state.profile.tenure || ""),
       style: state.profile.style || "",
       shots: state.profile.shots || [],
       levelId: state.levelId,
@@ -311,7 +312,7 @@
     if (p.region) data.z = p.region;
     if (p.courts && p.courts.length) data.ct = p.courts;
     if (p.frequency) data.f = p.frequency;
-    if (p.tenure) data.t = p.tenure;
+    if (p.tenure) data.t = normalizeTenure(p.tenure);
     if (p.style) data.st = p.style;
     if (p.shots && p.shots.length) data.sk = p.shots;
     return data;
@@ -337,7 +338,7 @@
         region: raw.z || "",
         courts: raw.ct || [],
         frequency: raw.f || "",
-        tenure: raw.t || "",
+        tenure: normalizeTenure(raw.t || ""),
         style: raw.st || "",
         shots: raw.sk || []
       },
@@ -387,7 +388,7 @@
         region: p.region || "",
         courts: p.courts || [],
         frequency: p.frequency || "",
-        tenure: p.tenure || "",
+        tenure: normalizeTenure(p.tenure || ""),
         style: p.style || "",
         shots: p.shots || []
       },
@@ -520,11 +521,18 @@
       telaviv: "תל אביב", shfela: "שפלה", jerusalem: "ירושלים", south: "דרום"
     },
     frequency: { weekly: "פעם בשבוע", "2-3": "2–3 בשבוע", "4plus": "4+ בשבוע" },
-    tenure: { under1: "פחות משנה", "1-2": "1–2 שנים", "3-5": "3–5 שנים", "5plus": "5+ שנים" },
+    tenure: {
+      under1: "פחות משנה",
+      "1-2": "1–2 שנים",
+      "2-3": "2–3 שנים",
+      "3plus": "מעל 3 שנים",
+      "3-5": "מעל 3 שנים",
+      "5plus": "מעל 3 שנים"
+    },
     style: { competitive: "תחרותי", social: "חברתי", both: "גם וגם" },
     shots: {
-      bandeja: "בנדחה", vibora: "ויבורה", smash: "סמאש", volley: "וולה/רשת",
-      lob: "לוב", walls: "משחק קירות", defense: "הגנה"
+      bandeja: "בנדחה", vibora: "ויבורה", smash: "סמאש", kicksmash: "קיק סמאש",
+      volley: "וולי/רשת", lob: "לוב", walls: "משחק קירות", defense: "הגנה"
     }
   };
 
@@ -803,9 +811,16 @@
     });
   }
 
+  function normalizeTenure(value) {
+    if (!value) return "";
+    if (value === "3-5" || value === "5plus" || value === "over3") return "3plus";
+    return value;
+  }
+
   function setSeg(name, value) {
+    var v = name === "tenure" ? normalizeTenure(value) : value;
     document.querySelectorAll('input[name="' + name + '"]').forEach(function (el) {
-      el.checked = el.value === value;
+      el.checked = el.value === v;
     });
   }
 
@@ -2079,7 +2094,7 @@
   function photoQualityPromptHtml() {
     return '<div class="photo-quality-prompt" id="photo-quality-prompt">' +
       "<p>התמונה ישנה ובאיכות נמוכה — העלה מחדש לתמונה חדה</p>" +
-      '<label class="btn btn-primary" id="card-photo-upload-label">' +
+      '<label class="btn btn-primary" id="card-photo-upload-label" for="card-photo-file">' +
         '<input id="card-photo-file" type="file" accept="image/*,.heic,.heif,image/jpeg,image/png,image/webp" />' +
         "העלאת תמונה" +
       "</label>" +
@@ -2118,7 +2133,7 @@
       region: $("region").value || "",
       courts: (state.courts || []).slice(),
       frequency: segValue("frequency"),
-      tenure: segValue("tenure"),
+      tenure: normalizeTenure(segValue("tenure")),
       style: segValue("style"),
       shots: checkedValues("shots")
     };
@@ -2192,7 +2207,7 @@
 
     var shots = (p.shots || []).map(function (k) { return LABELS.shots[k]; }).filter(Boolean);
     var shotsHtml = shots.length
-      ? '<p class="ut-section">מכה חזקה</p><div class="ut-shots">' + shots.map(function (s) {
+      ? '<p class="ut-section">חוזקות</p><div class="ut-shots">' + shots.map(function (s) {
           return '<span class="pill">' + escapeHtml(s) + "</span>";
         }).join("") + "</div>"
       : "";
@@ -2597,9 +2612,29 @@
     });
     $("goto-profile").addEventListener("click", function () { go("profile"); });
     $("profile-form").addEventListener("submit", saveProfile);
+    function armFilePicker(input) {
+      if (!input) return;
+      var label = input.closest("label");
+      if (!label) return;
+      label.addEventListener("click", function (ev) {
+        if (ev.target === input) return;
+        ev.preventDefault();
+        try { input.click(); } catch (err) {}
+      });
+    }
     $("video-file").addEventListener("change", function (ev) {
       addVideoFiles(ev.target.files);
       ev.target.value = "";
+    });
+    armFilePicker($("video-file"));
+    armFilePicker($("photo-file"));
+    document.addEventListener("click", function (ev) {
+      var label = ev.target && ev.target.closest && ev.target.closest("#card-photo-upload-label");
+      if (!label) return;
+      var input = $("card-photo-file");
+      if (!input || ev.target === input) return;
+      ev.preventDefault();
+      try { input.click(); } catch (err) {}
     });
     $("add-link").addEventListener("click", addVideoLink);
     $("add-court").addEventListener("click", addCourt);

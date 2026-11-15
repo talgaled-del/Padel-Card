@@ -412,6 +412,7 @@ h1 {
 }
 
 .upload {
+  position: relative;
   border: 1px dashed rgba(200, 255, 60, 0.35);
   background: rgba(200, 255, 60, 0.04);
   border-radius: 16px;
@@ -419,10 +420,26 @@ h1 {
   text-align: center;
   cursor: pointer;
   display: block;
+  overflow: hidden;
 }
 
-.upload input { display: none; }
-.upload strong { display: block; margin-bottom: 4px; }
+/* iOS Safari: display:none on <input type=file> makes the label a no-op.
+   Cover the label with a transparent input so the tap hits the control itself. */
+.upload input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+  display: block;
+  font-size: 24px;
+  z-index: 2;
+}
+.upload strong { display: block; margin-bottom: 4px; position: relative; z-index: 1; pointer-events: none; }
+.upload .note { position: relative; z-index: 1; pointer-events: none; }
 
 .video-list { display: grid; gap: 10px; margin-top: 10px; }
 .video-item {
