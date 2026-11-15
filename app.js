@@ -6,10 +6,12 @@
     cloudName: "jgreas8e",
     uploadPreset: "padel_card_videos",
     photoPreset: "padel_card_photos",
+    trackPreset: "padel_card_tracks",
     maxVideos: 3,
     maxBytes: 100 * 1024 * 1024,
     maxDuration: 180,
-    maxPhotoBytes: 40 * 1024 * 1024
+    maxPhotoBytes: 40 * 1024 * 1024,
+    videoTimeoutMs: 5 * 60 * 1000
   };
 
   const PHOTO_UPLOAD = {
@@ -60,7 +62,7 @@
       state.photo = (data.profile && data.profile.photo) || data.photo || null;
       state.partnerId = (data.profile && data.profile.partnerId) || data.partnerId || null;
       state.videos = (data.videos || []).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
       });
     } catch (err) {
       console.warn("לא ניתן לטעון נתונים שמורים", err);
@@ -77,7 +79,7 @@
       if (state.profile && !state.profile.id) state.profile.id = uid();
       state.answers = data.answers || [];
       state.videos = (data.videos || []).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
       });
       persist();
     } catch (err) { /* ignore */ }
@@ -93,7 +95,7 @@
       profile: state.profile,
       answers: state.answers,
       videos: state.videos.filter(function (v) { return !v.uploading; }).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, localOnly: !v.link };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, localOnly: !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
       })
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -121,7 +123,7 @@
       score: PadelQuiz.totalScore(state.answers),
       photo: state.photo || null,
       videos: state.videos.map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0 };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
       }).filter(function (v) { return v.link; })
     });
   }
@@ -203,6 +205,7 @@
   function isDirectVideo(url) {
     if (!url) return false;
     if (isCloudinaryVideo(url)) return true;
+    if (/^blob:/i.test(url) || /^data:video\//i.test(url)) return true;
     return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url);
   }
 
@@ -227,10 +230,18 @@
     if (v.link && !isDirectVideo(v.link) && !v.objectUrl) {
       return '<div class="video-item"><a class="link-row" href="' + escapeHtml(v.link) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(v.link) + "</a></div>";
     }
+    rememberVideo(v);
+    var tracked = !!(v.trackUrl || v.track || v.marker);
     return '<div class="ut-video-tile video-item" data-src="' + escapeHtml(src) + '"' +
-      (poster ? ' data-poster="' + escapeHtml(poster) + '"' : "") + ">" +
+      (v.id ? ' data-vid="' + escapeHtml(v.id) + '"' : "") +
+      (poster ? ' data-poster="' + escapeHtml(poster) + '"' : "") +
+      (v.trackUrl ? ' data-track-url="' + escapeHtml(v.trackUrl) + '"' : "") +
+      (v.marker ? ' data-marker="' + escapeHtml((v.marker || []).join(",")) + '"' : "") +
+      (tracked ? ' data-has-track="1"' : "") + ">" +
       (poster ? '<img class="ut-video-poster" alt="" src="' + escapeHtml(poster) + '">' : '<div class="ut-video-poster ut-video-fallback"></div>') +
-      '<button type="button" class="ut-play-btn" aria-label="ניגון סרטון"></button></div>';
+      '<button type="button" class="ut-play-btn" aria-label="ניגון סרטון"></button>' +
+      (tracked ? '<span class="track-badge ut-track-badge">מסומן</span>' : "") +
+      "</div>";
   }
 
   function compactPlayer(src, includePhoto) {
@@ -248,8 +259,13 @@
       sc: src.score || 0,
       v: videos.map(function (v) {
         if (!v.link) return null;
-        if (v.poster) return { u: v.link, p: v.poster };
-        return v.link;
+        var item = { u: v.link };
+        if (v.poster) item.p = v.poster;
+        if (v.trackUrl) item.t = v.trackUrl;
+        else if (v.track && compactTrackForLink(v.track)) item.k = compactTrackForLink(v.track);
+        else if (v.marker) item.m = v.marker;
+        if (!item.p && !item.t && !item.k && !item.m) return v.link;
+        return item;
       }).filter(Boolean)
     };
     var photo = p.photo || src.photo || null;
@@ -304,7 +320,10 @@
         var link = typeof item === "string" ? item : (item && (item.u || item.link)) || "";
         var poster = typeof item === "object" && item ? (item.p || item.poster || "") : "";
         if (!poster) poster = posterFromCloudinary(link);
-        return { id: "link-" + i, name: "סרטון " + (i + 1), link: link, poster: poster, objectUrl: null };
+        var trackUrl = typeof item === "object" && item ? (item.t || item.trackUrl || "") : "";
+        var marker = typeof item === "object" && item ? (item.m || item.marker || null) : null;
+        var packed = typeof item === "object" && item ? (item.k || item.track || null) : null;
+        return { id: "link-" + i, name: "סרטון " + (i + 1), link: link, poster: poster, objectUrl: null, trackUrl: trackUrl, marker: marker, track: packed };
       }).filter(function (v) { return v.link; })
     };
   }
@@ -792,7 +811,21 @@
       var label = document.createElement("span");
       label.textContent = bits.join(" · ");
       meta.appendChild(label);
+      if ((v.trackUrl || v.track || v.marker) && !v.uploading) {
+        var badge = document.createElement("span");
+        badge.className = "track-badge";
+        badge.textContent = "מסומן";
+        meta.appendChild(badge);
+      }
       if (editable && !v.uploading) {
+        if (isDirectVideo(v.link || v.objectUrl || "") && !v.trackUrl && !v.track) {
+          var mark = document.createElement("button");
+          mark.type = "button";
+          mark.className = "text-btn";
+          mark.textContent = "סימון שחקן";
+          mark.addEventListener("click", function () { openTrackPicker(v); });
+          meta.appendChild(mark);
+        }
         var rm = document.createElement("button");
         rm.type = "button";
         rm.className = "text-btn";
@@ -909,10 +942,11 @@
     state.videos.push(temp);
     renderVideoList("video-list", state.videos, true);
     setUploadProgress(true, 0, "מעלה את הסרטון… 0%");
+    temp.objectUrl = URL.createObjectURL(file);
     return uploadToCloudinary(file, function (ratio) {
       temp.progress = ratio;
       setUploadProgress(true, ratio, "מעלה את הסרטון… " + Math.round(ratio * 100) + "%");
-    }).then(function (res) {
+    }, { resourceType: "video", preset: CLOUDINARY.uploadPreset, timeout: CLOUDINARY.videoTimeoutMs }).then(function (res) {
       var poster = posterFromCloudinary(res.secure_url);
       temp.uploading = false;
       temp.link = res.secure_url;
@@ -922,9 +956,9 @@
       temp.publicId = res.public_id || "";
       persist();
       renderVideoList("video-list", state.videos, true);
-      setUploadProgress(true, 1, "הסרטון הועלה לכרטיס");
+      setUploadProgress(false, 0);
       showToast("הסרטון הועלה לכרטיס");
-      setTimeout(function () { setUploadProgress(false, 0); }, 1600);
+      return openTrackPicker(temp);
     }, function (err) {
       state.videos = state.videos.filter(function (x) { return x.id !== id; });
       renderVideoList("video-list", state.videos, true);
@@ -960,6 +994,524 @@
     input.value = "";
     persist();
     renderVideoList("video-list", state.videos, true);
+  }
+
+
+  var videoRecords = new Map();
+  var pickerState = {
+    video: null,
+    boxes: [],
+    selected: null,
+    running: false,
+    cancelled: false,
+    frame: null,
+    detectTimer: 0
+  };
+  var playerState = { track: null, raf: 0, expanded: false, src: "" };
+
+  function rememberVideo(v) {
+    if (v && v.id) videoRecords.set(v.id, v);
+  }
+
+  function compactTrackForLink(track) {
+    var packed = track && window.PadelTrack ? PadelTrack.pack(track) : track;
+    if (!packed) return null;
+    try {
+      var json = JSON.stringify(packed);
+      if (json.length <= 2200) return packed;
+    } catch (err) {}
+    return null;
+  }
+
+  function parseMarkerAttr(raw) {
+    if (!raw) return null;
+    var parts = String(raw).split(",").map(Number);
+    if (parts.length >= 3 && isFinite(parts[0]) && isFinite(parts[1]) && isFinite(parts[2])) {
+      return [parts[0], parts[1], parts[2]];
+    }
+    return null;
+  }
+
+  function contentRect(el, mediaW, mediaH) {
+    var w = el.clientWidth || 1;
+    var h = el.clientHeight || 1;
+    var mw = mediaW || w;
+    var mh = mediaH || h;
+    var scale = Math.min(w / mw, h / mh);
+    var cw = mw * scale;
+    var ch = mh * scale;
+    return { left: (w - cw) / 2, top: (h - ch) / 2, w: cw, h: ch, stageW: w, stageH: h };
+  }
+
+  function setTrackProgress(show, ratio, label) {
+    var wrap = $("track-progress");
+    var bar = $("track-progress-bar");
+    var text = $("track-progress-label");
+    if (!wrap) return;
+    wrap.classList.toggle("hidden", !show);
+    if (bar) bar.style.width = Math.round((ratio || 0) * 100) + "%";
+    if (text) text.textContent = label || "מזהה את השחקן בסרטון…";
+  }
+
+  function setPickerRunning(running) {
+    pickerState.running = running;
+    $("track-scrub-wrap").classList.toggle("hidden", running);
+    $("track-picker-actions").classList.toggle("hidden", running);
+    $("track-picker-cancel-run").classList.toggle("hidden", !running);
+  }
+
+  function closeTrackPicker() {
+    pickerState.cancelled = true;
+    pickerState.running = false;
+    pickerState.video = null;
+    pickerState.boxes = [];
+    pickerState.selected = null;
+    var overlay = $("track-picker");
+    if (overlay) overlay.classList.add("hidden");
+    var vid = $("track-picker-video");
+    if (vid) {
+      try { vid.pause(); } catch (err) {}
+      vid.removeAttribute("src");
+      vid.load();
+    }
+    setTrackProgress(false, 0);
+    setPickerRunning(false);
+  }
+
+  function layoutPicker() {
+    var video = $("track-picker-video");
+    var canvas = $("track-picker-canvas");
+    var stage = $("track-picker-stage");
+    if (!video || !canvas || !stage) return;
+    var rect = stage.getBoundingClientRect();
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    canvas.style.width = rect.width + "px";
+    canvas.style.height = rect.height + "px";
+    pickerState.frame = contentRect(stage, video.videoWidth || 16, video.videoHeight || 9);
+    pickerState.dpr = dpr;
+  }
+
+  function drawPicker() {
+    var canvas = $("track-picker-canvas");
+    if (!canvas) return;
+    layoutPicker();
+    var ctx = canvas.getContext("2d");
+    var dpr = pickerState.dpr || 1;
+    var frame = pickerState.frame;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!frame) return;
+    var i;
+    for (i = 0; i < pickerState.boxes.length; i++) {
+      var b = pickerState.boxes[i];
+      ctx.strokeStyle = "rgba(200, 255, 60, 0.85)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(frame.left + b.x * frame.w, frame.top + b.y * frame.h, b.w * frame.w, b.h * frame.h);
+    }
+    var sel = pickerState.selected;
+    if (sel) {
+      var cx = frame.left + sel.x * frame.w;
+      var cy = frame.top + sel.y * frame.h;
+      var r = sel.r * frame.w;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = "#c8ff3c";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = "rgba(200, 255, 60, 0.14)";
+      ctx.fill();
+      ctx.font = "800 14px Heebo, sans-serif";
+      ctx.fillStyle = "#c8ff3c";
+      ctx.textAlign = "center";
+      ctx.fillText("אני", cx, cy - r - 8);
+    }
+  }
+
+  function refreshPickerDetections() {
+    var video = $("track-picker-video");
+    if (!video || !window.PadelTrack || pickerState.running) return Promise.resolve();
+    var frame = PadelTrack.grabFrame(video, 416);
+    return PadelTrack.detectPeople(frame).then(function (boxes) {
+      pickerState.boxes = boxes || [];
+      drawPicker();
+    }).catch(function () {
+      pickerState.boxes = [];
+      drawPicker();
+    });
+  }
+
+  function onPickerScrub() {
+    var video = $("track-picker-video");
+    var slider = $("track-picker-scrub");
+    if (!video || !slider || !isFinite(video.duration) || !video.duration) return;
+    var t = (Number(slider.value) / 1000) * video.duration;
+    if (pickerState.detectTimer) clearTimeout(pickerState.detectTimer);
+    PadelTrack.seekTo(video, t).then(function () {
+      drawPicker();
+      pickerState.detectTimer = setTimeout(function () { refreshPickerDetections(); }, 120);
+    });
+  }
+
+  function onPickerTap(ev) {
+    if (pickerState.running) return;
+    var canvas = $("track-picker-canvas");
+    var frame = pickerState.frame;
+    if (!canvas || !frame || frame.w <= 0) return;
+    var rect = canvas.getBoundingClientRect();
+    var px = ev.clientX - rect.left;
+    var py = ev.clientY - rect.top;
+    var x = (px - frame.left) / frame.w;
+    var y = (py - frame.top) / frame.h;
+    if (x < -0.02 || x > 1.02 || y < -0.02 || y > 1.02) return;
+    x = Math.max(0, Math.min(1, x));
+    y = Math.max(0, Math.min(1, y));
+    var box = window.PadelTrack ? PadelTrack.pickBoxAtPoint(pickerState.boxes, x, y) : null;
+    if (box) {
+      var aspect = (pickerState.frame && pickerState.frame.h && pickerState.frame.w)
+        ? ($("track-picker-video").videoHeight / $("track-picker-video").videoWidth)
+        : 9 / 16;
+      var pt = PadelTrack.pointFromBox(box, aspect);
+      pickerState.selected = { x: pt.x, y: pt.y, r: pt.r, box: box };
+    } else {
+      pickerState.selected = { x: x, y: y, r: PadelTrack.defaultRadius(), box: null };
+    }
+    $("track-picker-confirm").disabled = false;
+    drawPicker();
+  }
+
+  function uploadTrackJson(packed) {
+    var json = JSON.stringify(packed);
+    var blob = new Blob([json], { type: "application/json" });
+    var file;
+    try { file = new File([blob], "padel-track.json", { type: "application/json" }); }
+    catch (err) { file = blob; }
+    return uploadToCloudinary(file, null, {
+      resourceType: "raw",
+      preset: CLOUDINARY.trackPreset,
+      timeout: 30000
+    });
+  }
+
+  function applyTrackToVideo(v, track, trackUrl) {
+    var packed = window.PadelTrack ? PadelTrack.pack(track) : track;
+    v.track = packed || track;
+    if (trackUrl) v.trackUrl = trackUrl;
+    if (track && track.m && (!track.k || !track.k.length)) {
+      v.marker = [Math.round(track.m[0] * 1000), Math.round(track.m[1] * 1000), Math.round(track.m[2] * 1000)];
+    } else if (packed && packed.m && !packed.k) {
+      v.marker = packed.m;
+    }
+    persist();
+    renderVideoList("video-list", state.videos, true);
+  }
+
+  function finishPickerWithStatic(v, reason) {
+    var sel = pickerState.selected;
+    if (!sel) {
+      closeTrackPicker();
+      if (reason) showToast(reason);
+      else showToast("הסרטון נשמר בלי סימון שחקן");
+      return Promise.resolve();
+    }
+    var duration = ($("track-picker-video") && $("track-picker-video").duration) || v.duration || 0;
+    var track = PadelTrack.staticTrack(sel.x, sel.y, sel.r, PadelTrack.HOLD_SEC, duration);
+    applyTrackToVideo(v, track, "");
+    closeTrackPicker();
+    showToast(reason || "הסימון נשמר בתחילת הסרטון");
+    return Promise.resolve();
+  }
+
+  function runTracking(v) {
+    var sel = pickerState.selected;
+    var video = $("track-picker-video");
+    if (!sel || !video) return finishPickerWithStatic(v);
+    pickerState.cancelled = false;
+    setPickerRunning(true);
+    setTrackProgress(true, 0, "מזהה את השחקן בסרטון… 0%");
+    var startBox = sel.box || {
+      x: Math.max(0, sel.x - sel.r),
+      y: Math.max(0, sel.y - sel.r / ((video.videoHeight || 9) / (video.videoWidth || 16))),
+      w: sel.r * 2,
+      h: (sel.r * 2) * ((video.videoWidth || 16) / (video.videoHeight || 9))
+    };
+    var t0 = video.currentTime || 0;
+    return PadelTrack.trackPlayer(video, startBox, {
+      t0: t0,
+      interval: 0.28,
+      onProgress: function (ratio) {
+        setTrackProgress(true, ratio, "מזהה את השחקן בסרטון… " + Math.round(ratio * 100) + "%");
+      },
+      shouldCancel: function () { return pickerState.cancelled; }
+    }).then(function (track) {
+      if (pickerState.cancelled) return finishPickerWithStatic(v);
+      if (!track || !PadelTrack.isUsefulTrack(track)) {
+        return finishPickerWithStatic(v, "לא הצלחנו לעקוב אחרי השחקן לכל אורך הסרטון. נשמר סימון בתחילת הסרטון");
+      }
+      setTrackProgress(true, 1, "שומר את הסימון…");
+      var packed = PadelTrack.pack(track);
+      return uploadTrackJson(packed).then(function (res) {
+        applyTrackToVideo(v, track, res.secure_url);
+        closeTrackPicker();
+        showToast("השחקן סומן בסרטון");
+      }, function () {
+        applyTrackToVideo(v, track, "");
+        closeTrackPicker();
+        showToast("השחקן סומן בסרטון");
+      });
+    }, function () {
+      return finishPickerWithStatic(v, "לא הצלחנו לזהות את השחקן. נשמר סימון בנקודה שנבחרה");
+    });
+  }
+
+  function openTrackPicker(v) {
+    if (!v || !window.PadelTrack) {
+      showToast("לא ניתן לסמן שחקן כרגע");
+      return Promise.resolve();
+    }
+    var src = v.objectUrl || v.link;
+    if (!src || !isDirectVideo(src)) {
+      showToast("אפשר לסמן שחקן רק בסרטון שהועלה מהמכשיר");
+      return Promise.resolve();
+    }
+    pickerState.cancelled = false;
+    pickerState.running = false;
+    pickerState.boxes = [];
+    pickerState.selected = null;
+    pickerState.video = v;
+    var overlay = $("track-picker");
+    var video = $("track-picker-video");
+    var confirm = $("track-picker-confirm");
+    overlay.classList.remove("hidden");
+    confirm.disabled = true;
+    setPickerRunning(false);
+    setTrackProgress(false, 0, "טוען את מזהה השחקנים…");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.onloadedmetadata = function () {
+      if (video.videoWidth && video.videoHeight) {
+        $("track-picker-stage").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
+      }
+    };
+    video.src = src;
+    return new Promise(function (resolve) {
+      var settled = false;
+      var done = function () {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      var onReady = function () {
+        video.removeEventListener("loadeddata", onReady);
+        var start = Math.min(0.4, Math.max(0, (video.duration || 1) * 0.08));
+        PadelTrack.seekTo(video, start).then(function () {
+          $("track-picker-scrub").value = video.duration ? String(Math.round((video.currentTime / video.duration) * 1000)) : "0";
+          layoutPicker();
+          drawPicker();
+          setTrackProgress(true, 0, "טוען את מזהה השחקנים…");
+          return PadelTrack.loadDetector().then(function () {
+            setTrackProgress(false, 0);
+            return refreshPickerDetections();
+          }).catch(function () {
+            setTrackProgress(false, 0);
+            showToast("לא ניתן לזהות אוטומטית. לחצו על עצמכם בתמונה");
+          });
+        }).then(done, done);
+      };
+      video.addEventListener("loadeddata", onReady);
+      if (video.readyState >= 2) onReady();
+      setTimeout(function () {
+        if (!settled) onReady();
+      }, 4000);
+    });
+  }
+
+  function videoContentFromTile(tile) {
+    var id = tile.getAttribute("data-vid") || "";
+    var rec = id && videoRecords.get(id);
+    var marker = rec && rec.marker ? rec.marker : parseMarkerAttr(tile.getAttribute("data-marker"));
+    return {
+      src: tile.getAttribute("data-src") || (rec && (rec.objectUrl || rec.link)) || "",
+      poster: tile.getAttribute("data-poster") || (rec && rec.poster) || "",
+      trackUrl: tile.getAttribute("data-track-url") || (rec && rec.trackUrl) || "",
+      marker: marker,
+      track: rec && rec.track ? rec.track : null
+    };
+  }
+
+  function resolvePlayerTrack(opts) {
+    if (opts.track && window.PadelTrack) {
+      var unpacked = PadelTrack.unpack(opts.track) || opts.track;
+      if (unpacked) return Promise.resolve(unpacked);
+    }
+    if (opts.trackUrl && window.PadelTrack) {
+      return PadelTrack.fetchTrack(opts.trackUrl).catch(function () { return null; });
+    }
+    if (opts.marker && window.PadelTrack) {
+      return Promise.resolve(PadelTrack.staticTrack(opts.marker[0] / 1000, opts.marker[1] / 1000, opts.marker[2] / 1000));
+    }
+    return Promise.resolve(null);
+  }
+
+  function layoutPlayer() {
+    var video = $("vp-video");
+    var canvas = $("vp-overlay");
+    var stage = $("vp-stage");
+    if (!video || !canvas || !stage) return null;
+    var rect = stage.getBoundingClientRect();
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    canvas.style.width = rect.width + "px";
+    canvas.style.height = rect.height + "px";
+    return { frame: contentRect(stage, video.videoWidth || 16, video.videoHeight || 9), dpr: dpr };
+  }
+
+  function updatePlayerChrome() {
+    var video = $("vp-video");
+    var slider = $("vp-seek");
+    var time = $("vp-time");
+    var play = $("vp-play");
+    if (video && slider && isFinite(video.duration) && video.duration) {
+      slider.value = String(Math.round((video.currentTime / video.duration) * 1000));
+    }
+    if (video && time) {
+      time.textContent = formatDuration(video.currentTime || 0) + " / " + formatDuration(video.duration || 0);
+    }
+    if (play) play.textContent = video && !video.paused ? "❚❚" : "▶";
+  }
+
+  function drawPlayerOverlay() {
+    var video = $("vp-video");
+    var canvas = $("vp-overlay");
+    updatePlayerChrome();
+    if (!video || !canvas) return;
+    var layout = layoutPlayer();
+    if (!layout) return;
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(layout.dpr, 0, 0, layout.dpr, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!playerState.track || !window.PadelTrack) return;
+    var pos = PadelTrack.atTime(playerState.track, video.currentTime || 0);
+    if (!pos || !pos.visible || pos.fade <= 0.02) return;
+    var frame = layout.frame;
+    var cx = frame.left + pos.x * frame.w;
+    var cy = frame.top + pos.y * frame.h;
+    var r = Math.max(10, pos.r * frame.w);
+    ctx.save();
+    ctx.globalAlpha = 0.25 + 0.75 * pos.fade;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = "#c8ff3c";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = "rgba(200, 255, 60, 0.12)";
+    ctx.fill();
+    ctx.font = "800 14px Heebo, sans-serif";
+    ctx.fillStyle = "#c8ff3c";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(pos.static ? "אני" : "אני", cx, cy - r - 6);
+    ctx.restore();
+  }
+
+  function tickPlayer() {
+    drawPlayerOverlay();
+    var video = $("vp-video");
+    var slider = $("vp-seek");
+    var time = $("vp-time");
+    var play = $("vp-play");
+    if (video && slider && isFinite(video.duration) && video.duration) {
+      slider.value = String(Math.round((video.currentTime / video.duration) * 1000));
+    }
+    if (video && time) {
+      time.textContent = formatDuration(video.currentTime || 0) + " / " + formatDuration(video.duration || 0);
+    }
+    if (play) play.textContent = video && !video.paused ? "❚❚" : "▶";
+    if (video && !video.paused) {
+      playerState.raf = requestAnimationFrame(tickPlayer);
+    } else {
+      playerState.raf = 0;
+    }
+  }
+
+  function closeVideoPlayer() {
+    var overlay = $("video-player");
+    var video = $("vp-video");
+    var shell = $("vp-shell");
+    if (playerState.raf) cancelAnimationFrame(playerState.raf);
+    playerState.raf = 0;
+    playerState.track = null;
+    playerState.expanded = false;
+    if (shell) shell.classList.remove("is-expanded");
+    if (video) {
+      try { video.pause(); } catch (err) {}
+      video.removeAttribute("src");
+      video.load();
+    }
+    if (overlay) overlay.classList.add("hidden");
+  }
+
+  function expandPlayerView(on) {
+    var shell = $("vp-shell");
+    playerState.expanded = !!on;
+    if (shell) shell.classList.toggle("is-expanded", !!on);
+    $("vp-expand").textContent = on ? "↙" : "⛶";
+    requestAnimationFrame(function () { drawPlayerOverlay(); });
+  }
+
+  function blockNativeFullscreen(video) {
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+    video.playsInline = true;
+    video.controls = false;
+    try { video.controlsList = "nofullscreen nodownload noremoteplayback"; } catch (err) {}
+    var exit = function () {
+      try {
+        if (video.webkitDisplayingFullscreen && video.webkitExitFullscreen) video.webkitExitFullscreen();
+        if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+      } catch (err) {}
+      expandPlayerView(true);
+    };
+    video.addEventListener("webkitbeginfullscreen", function (ev) {
+      ev.preventDefault();
+      exit();
+    });
+    video.addEventListener("fullscreenchange", function () {
+      if (document.fullscreenElement === video) exit();
+    });
+  }
+
+  function openVideoPlayer(opts) {
+    opts = opts || {};
+    if (!opts.src) return;
+    var overlay = $("video-player");
+    var video = $("vp-video");
+    var hint = $("vp-hint");
+    overlay.classList.remove("hidden");
+    expandPlayerView(false);
+    playerState.src = opts.src;
+    video.poster = opts.poster || "";
+    video.onloadedmetadata = function () {
+      if (video.videoWidth && video.videoHeight) {
+        $("vp-stage").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
+      }
+      drawPlayerOverlay();
+    };
+    video.src = opts.src;
+    video.playsInline = true;
+    blockNativeFullscreen(video);
+    hint.classList.add("hidden");
+    resolvePlayerTrack(opts).then(function (track) {
+      playerState.track = track;
+      if (track) hint.classList.remove("hidden");
+      drawPlayerOverlay();
+    });
+    var play = video.play();
+    if (play && play.catch) play.catch(function () {});
+    if (!playerState.raf) playerState.raf = requestAnimationFrame(tickPlayer);
   }
 
   function isPhotoFile(file) {
@@ -1848,23 +2400,68 @@
     $("pair-back-card").addEventListener("click", function () { go("card"); });
     document.addEventListener("click", function (ev) {
       var tile = ev.target.closest(".ut-video-tile");
-      if (!tile || tile.querySelector("video")) return;
-      if (!ev.target.closest(".ut-play-btn, .ut-video-poster, .ut-video-tile")) return;
+      if (!tile) return;
+      if (!ev.target.closest(".ut-play-btn, .ut-video-poster, .ut-video-tile, .ut-track-badge")) return;
       ev.preventDefault();
-      var src = tile.getAttribute("data-src");
-      if (!src) return;
-      var poster = tile.getAttribute("data-poster") || "";
-      var vid = document.createElement("video");
-      vid.controls = true;
-      vid.autoplay = true;
-      vid.playsInline = true;
-      vid.preload = "metadata";
-      if (poster) vid.poster = poster;
-      vid.src = src;
-      tile.innerHTML = "";
-      tile.appendChild(vid);
-      var play = vid.play();
-      if (play && play.catch) play.catch(function () {});
+      var info = videoContentFromTile(tile);
+      if (!info.src) return;
+      openVideoPlayer(info);
+    });
+    $("track-picker-skip").addEventListener("click", function () {
+      if (pickerState.video) finishPickerWithStatic(pickerState.video);
+      else closeTrackPicker();
+    });
+    $("track-picker-confirm").addEventListener("click", function () {
+      if (pickerState.video) runTracking(pickerState.video);
+    });
+    $("track-picker-cancel-run").addEventListener("click", function () {
+      pickerState.cancelled = true;
+    });
+    $("track-picker-scrub").addEventListener("input", onPickerScrub);
+    $("track-picker-canvas").addEventListener("click", onPickerTap);
+    $("track-picker").addEventListener("click", function (ev) {
+      if (ev.target === $("track-picker") && !pickerState.running) {
+        if (pickerState.video && pickerState.selected) finishPickerWithStatic(pickerState.video);
+        else closeTrackPicker();
+      }
+    });
+    $("vp-close").addEventListener("click", closeVideoPlayer);
+    $("vp-expand").addEventListener("click", function () { expandPlayerView(!playerState.expanded); });
+    $("vp-play").addEventListener("click", function () {
+      var video = $("vp-video");
+      if (!video) return;
+      if (video.paused) {
+        var play = video.play();
+        if (play && play.catch) play.catch(function () {});
+        if (!playerState.raf) playerState.raf = requestAnimationFrame(tickPlayer);
+      } else {
+        video.pause();
+        drawPlayerOverlay();
+      }
+    });
+    $("vp-seek").addEventListener("input", function () {
+      var video = $("vp-video");
+      var slider = $("vp-seek");
+      if (!video || !isFinite(video.duration) || !video.duration) return;
+      video.currentTime = (Number(slider.value) / 1000) * video.duration;
+      drawPlayerOverlay();
+    });
+    $("video-player").addEventListener("click", function (ev) {
+      if (ev.target === $("video-player") && !playerState.expanded) closeVideoPlayer();
+    });
+    $("vp-video").addEventListener("play", function () {
+      if (!playerState.raf) playerState.raf = requestAnimationFrame(tickPlayer);
+    });
+    $("vp-video").addEventListener("pause", function () { drawPlayerOverlay(); });
+    $("vp-video").addEventListener("ended", function () { drawPlayerOverlay(); });
+    $("vp-video").addEventListener("seeked", function () { drawPlayerOverlay(); });
+    $("vp-video").addEventListener("timeupdate", function () {
+      var video = $("vp-video");
+      if (video && video.paused) drawPlayerOverlay();
+    });
+    window.addEventListener("resize", function () {
+      if (!$("track-picker").classList.contains("hidden")) drawPicker();
+      if (!$("video-player").classList.contains("hidden")) drawPlayerOverlay();
     });
     window.addEventListener("hashchange", render);
   }

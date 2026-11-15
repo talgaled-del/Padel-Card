@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="styles.css?v=6" />
-  <link rel="stylesheet" href="cards.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
+  <link rel="stylesheet" href="cards.css?v=7" />
 </head>
 <body>
   <div id="app">
@@ -244,7 +244,7 @@
         </div>
         <div class="field">
           <span class="legend">סרטוני משחק</span>
-          <p class="note">העלו סרטון משחק מהגלריה או מהמצלמה (עד 3 סרטונים, עד 100MB ו־3 דקות לכל אחד). הסרטון נשמר בענן ויופיע בקישור המשותף. אפשר גם להוסיף קישור חיצוני (יוטיוב, גוגל דרייב וכו').</p>
+          <p class="note">העלו סרטון משחק מהגלריה או מהמצלמה (עד 3 סרטונים, עד 100MB ו־3 דקות לכל אחד). אחרי ההעלאה תתבקשו לסמן את עצמכם בסרטון, כדי שהמארגן יידע על מי להתמקד. אפשר גם להוסיף קישור חיצוני.</p>
           <label class="upload">
             <input id="video-file" type="file" accept="video/*" multiple />
             <strong>העלאת סרטון מהמכשיר</strong>
@@ -330,9 +330,51 @@
       <button class="btn btn-ghost" id="link-fallback-close" type="button">סגור</button>
     </div>
   </div>
+
+  <div id="track-picker" class="track-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="track-picker-title">
+    <div class="track-sheet">
+      <h2 id="track-picker-title">מי אתם בסרטון?</h2>
+      <p class="track-lead">לחצו על עצמכם בתמונה, כדי שהמארגן יידע על מי להתמקד.</p>
+      <div class="track-stage" id="track-picker-stage">
+        <video id="track-picker-video" playsinline muted webkit-playsinline></video>
+        <canvas id="track-picker-canvas"></canvas>
+      </div>
+      <label class="track-scrub" id="track-scrub-wrap">
+        <span>בחירת רגע בסרטון</span>
+        <input id="track-picker-scrub" type="range" min="0" max="1000" value="0" step="1" dir="ltr" />
+      </label>
+      <div class="upload-progress hidden" id="track-progress" aria-live="polite">
+        <div class="upload-progress-track"><div class="upload-progress-bar" id="track-progress-bar"></div></div>
+        <span id="track-progress-label">מזהה את השחקן בסרטון… 0%</span>
+      </div>
+      <div class="btn-row two" id="track-picker-actions">
+        <button class="btn btn-ghost" id="track-picker-skip" type="button">דילוג</button>
+        <button class="btn btn-primary" id="track-picker-confirm" type="button" disabled>המשך</button>
+      </div>
+      <button class="btn btn-ghost hidden" id="track-picker-cancel-run" type="button">ביטול הזיהוי</button>
+    </div>
+  </div>
+  <div id="video-player" class="vp-overlay hidden" role="dialog" aria-modal="true">
+    <div class="vp-shell" id="vp-shell">
+      <div class="vp-stage" id="vp-stage">
+        <video id="vp-video" playsinline webkit-playsinline preload="metadata"></video>
+        <canvas id="vp-overlay"></canvas>
+      </div>
+      <div class="vp-bar">
+        <button class="vp-btn" id="vp-play" type="button" aria-label="ניגון">▶</button>
+        <input id="vp-seek" type="range" min="0" max="1000" value="0" step="1" dir="ltr" />
+        <span id="vp-time" dir="ltr">0:00</span>
+        <button class="vp-btn" id="vp-expand" type="button" aria-label="הגדלה">⛶</button>
+        <button class="vp-btn" id="vp-close" type="button" aria-label="סגירה">×</button>
+      </div>
+      <p class="vp-hint hidden" id="vp-hint">העיגול מסמן את השחקן בכרטיס</p>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="status"></div>
-  <script src="quiz.js?v=6"></script>
-  <script src="players.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="quiz.js?v=7"></script>
+  <script src="players.js?v=7"></script>
+  <script src="track.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

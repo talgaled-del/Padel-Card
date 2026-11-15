@@ -505,3 +505,11 @@ body.mode-showcase.has-dock #card-root { padding-bottom: 118px; }
   border-right: none;
   border-top: none;
 }
+
+.ut-video-tile .ut-track-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  margin: 0;
+}
