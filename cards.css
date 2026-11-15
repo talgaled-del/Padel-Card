@@ -21,10 +21,56 @@ body.mode-showcase .topbar {
   background: linear-gradient(to bottom, rgba(5, 7, 12, 0.72), transparent);
 }
 body.mode-showcase .brand-text { display: none; }
+body.mode-showcase .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  min-width: 44px;
+  padding-block: 4px;
+  padding-inline-start: 10px;
+  padding-inline-end: 14px;
+  border-radius: 999px;
+  background: rgba(8, 14, 12, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  color: #f4f7f2;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease, filter 0.15s ease;
+}
+body.mode-showcase .brand:active {
+  transform: scale(0.97);
+  background: rgba(8, 14, 12, 0.88);
+  border-color: rgba(200, 255, 60, 0.4);
+  filter: brightness(1.08);
+}
+body.mode-showcase .home-back,
+body.mode-showcase .home-back-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+body.mode-showcase .home-back-chevron {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  display: block;
+  color: #c8ff3c;
+}
+body.mode-showcase .home-back-label {
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: #f4f7f2;
+}
 body.mode-showcase .logo-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 8px;
+  font-size: 0.85rem;
   box-shadow: 0 0 0 3px rgba(200, 255, 60, 0.15);
 }
 

@@ -91,6 +91,10 @@ body::before {
 .brand-text strong { font-size: 0.95rem; font-weight: 800; letter-spacing: -0.02em; }
 .brand-text span { font-size: 0.72rem; color: var(--muted); margin-top: -2px; }
 
+/* Home-back affordance is shown only on card/pair showcase screens */
+.home-back,
+.home-back-label { display: none; }
+
 .icon-btn, .text-btn {
   appearance: none;
   border: 0;
@@ -201,6 +205,13 @@ h1 {
 .btn-whatsapp {
   background: #25d366;
   color: #06210f;
+  box-shadow: 0 8px 24px rgba(37, 211, 102, 0.28);
+}
+.btn-whatsapp .wa-icon {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: block;
 }
 
 .btn-row { display: grid; gap: 10px; margin-top: 8px; }

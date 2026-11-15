@@ -5,12 +5,15 @@ services:
     buildCommand: "true"
     staticPublishPath: ./
     headers:
+      # HTML must be revalidated so it can point at a new /vN/ folder.
+      # Query-string busting (?v=N) does not work on Render's CDN (query string is ignored).
+      # These headers apply only if the service is managed by this Blueprint.
       - path: /
         name: Cache-Control
         value: no-cache, no-store, must-revalidate
       - path: /index.html
         name: Cache-Control
         value: no-cache, no-store, must-revalidate
-      - path: /*
+      - path: /v10/*
         name: Cache-Control
-        value: no-cache, must-revalidate
+        value: public, max-age=31536000, immutable

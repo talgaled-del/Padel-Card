@@ -2330,6 +2330,7 @@
     var partner = local ? linkedPartner() : null;
     $("owner-actions").classList.toggle("hidden", !owns);
     $("copy-own-link").classList.toggle("hidden", !owns);
+    setWhatsAppShare($("wa-share-own"), owns, owns ? urlToCopyForCard() : "", "single");
     $("copy-pair-from-card").classList.toggle("hidden", !local || !partner);
     $("local-card-actions").classList.toggle("hidden", !local);
     $("open-pair").classList.toggle("hidden", !local || !partner);
@@ -2357,6 +2358,7 @@
     var owns = viewerOwnsViewedPair();
     $("pair-owner-actions").classList.toggle("hidden", !owns);
     $("copy-pair-link").classList.toggle("hidden", !owns);
+    setWhatsAppShare($("wa-share-pair"), owns, owns ? urlToCopyForPair() : "", "pair");
     $("pair-back-card").classList.toggle("hidden", !isLocalLivePair());
 
     $("pair-level-chip").className = badgeClass(summary.letter);
@@ -2419,6 +2421,22 @@
     if (state.publicPair) return currentPageUrl();
     if (linkedPartner()) return pairShareUrl(currentCardData(), partnerAsCard(linkedPartner()));
     return singleShareUrl();
+  }
+
+  function whatsappShareText(url, kind) {
+    var intro = kind === "pair" ? "כרטיס הזוג שלנו בפאדל 🎾" : "הכרטיס שחקן פאדל שלי 🎾";
+    return intro + "\n" + url;
+  }
+
+  function whatsappShareHref(url, kind) {
+    return "https://wa.me/?text=" + encodeURIComponent(whatsappShareText(url, kind));
+  }
+
+  function setWhatsAppShare(el, visible, url, kind) {
+    if (!el) return;
+    el.classList.toggle("hidden", !visible);
+    if (visible && url) el.setAttribute("href", whatsappShareHref(url, kind));
+    else el.setAttribute("href", "https://wa.me/");
   }
 
   function shareMessage(url) {
@@ -2679,6 +2697,19 @@
     $("copy-own-link").addEventListener("click", function () { copyText(urlToCopyForCard()); });
     $("copy-pair-from-card").addEventListener("click", function () { copyText(urlToCopyForPair()); });
     $("copy-pair-link").addEventListener("click", function () { copyText(urlToCopyForPair()); });
+    function armWhatsAppShare(id, urlFn, kind) {
+      var el = $(id);
+      if (!el) return;
+      function syncHref() {
+        var url = urlFn();
+        if (url) el.href = whatsappShareHref(url, kind);
+      }
+      ["pointerdown", "touchstart", "click"].forEach(function (evt) {
+        el.addEventListener(evt, syncHref);
+      });
+    }
+    armWhatsAppShare("wa-share-own", urlToCopyForCard, "single");
+    armWhatsAppShare("wa-share-pair", urlToCopyForPair, "pair");
     $("link-fallback-close").addEventListener("click", hideLinkFallback);
     $("link-fallback-select").addEventListener("click", function () {
       var input = $("link-fallback-input");
