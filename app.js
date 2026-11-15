@@ -2,6 +2,13 @@
   const STORAGE_KEY = "padelCard.v2";
   const PHOTO_SHARE_MAX = 18000;
   const videoBlobs = new Map();
+  const CLOUDINARY = {
+    cloudName: "jgreas8e",
+    uploadPreset: "padel_card_videos",
+    maxVideos: 3,
+    maxBytes: 100 * 1024 * 1024,
+    maxDuration: 180
+  };
 
   const state = {
     view: "home",
@@ -38,7 +45,7 @@
       state.photo = (data.profile && data.profile.photo) || data.photo || null;
       state.partnerId = (data.profile && data.profile.partnerId) || data.partnerId || null;
       state.videos = (data.videos || []).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", objectUrl: null, localOnly: !!v.localOnly };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link };
       });
     } catch (err) {
       console.warn("לא ניתן לטעון נתונים שמורים", err);
@@ -55,7 +62,7 @@
       if (state.profile && !state.profile.id) state.profile.id = uid();
       state.answers = data.answers || [];
       state.videos = (data.videos || []).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", objectUrl: null, localOnly: !!v.localOnly };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link };
       });
       persist();
     } catch (err) { /* ignore */ }
@@ -70,8 +77,8 @@
       levelId: state.levelId,
       profile: state.profile,
       answers: state.answers,
-      videos: state.videos.map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", localOnly: !v.link };
+      videos: state.videos.filter(function (v) { return !v.uploading; }).map(function (v) {
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, localOnly: !v.link };
       })
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -103,7 +110,7 @@
       score: PadelQuiz.totalScore(state.answers),
       photo: state.photo || null,
       videos: state.videos.map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "" };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0 };
       }).filter(function (v) { return v.link; })
     });
   }
@@ -124,6 +131,48 @@
     return new TextDecoder().decode(bytes);
   }
 
+  function isCloudinaryVideo(url) {
+    return /res\.cloudinary\.com\/[^/]+\/video\/upload\//.test(url || "");
+  }
+
+  function posterFromCloudinary(url) {
+    if (!isCloudinaryVideo(url)) return "";
+    return url.replace("/video/upload/", "/video/upload/so_auto/").replace(/\.[a-z0-9]+(?=\?|$)/i, ".jpg");
+  }
+
+  function isDirectVideo(url) {
+    if (!url) return false;
+    if (isCloudinaryVideo(url)) return true;
+    return /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url);
+  }
+
+  function formatBytes(n) {
+    if (!n) return "";
+    if (n < 1024 * 1024) return Math.max(1, Math.round(n / 1024)) + "KB";
+    return (n / (1024 * 1024)).toFixed(n >= 10 * 1024 * 1024 ? 0 : 1) + "MB";
+  }
+
+  function formatDuration(sec) {
+    if (!sec || !isFinite(sec)) return "";
+    var s = Math.round(sec);
+    var m = Math.floor(s / 60);
+    var r = s % 60;
+    return m + ":" + (r < 10 ? "0" : "") + r;
+  }
+
+  function videoTileHtml(v) {
+    var src = v.link || v.objectUrl || "";
+    var poster = v.poster || posterFromCloudinary(v.link || "");
+    if (!src) return "";
+    if (v.link && !isDirectVideo(v.link) && !v.objectUrl) {
+      return '<div class="video-item"><a class="link-row" href="' + escapeHtml(v.link) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(v.link) + "</a></div>";
+    }
+    return '<div class="ut-video-tile video-item" data-src="' + escapeHtml(src) + '"' +
+      (poster ? ' data-poster="' + escapeHtml(poster) + '"' : "") + ">" +
+      (poster ? '<img class="ut-video-poster" alt="" src="' + escapeHtml(poster) + '">' : '<div class="ut-video-poster ut-video-fallback"></div>') +
+      '<button type="button" class="ut-play-btn" aria-label="ניגון סרטון"></button></div>';
+  }
+
   function compactPlayer(src, includePhoto) {
     var p = src.profile || src;
     var videos = src.videos || [];
@@ -137,7 +186,11 @@
       c: p.competitor,
       lv: src.levelId || p.levelId,
       sc: src.score || 0,
-      v: videos.map(function (v) { return v.link; }).filter(Boolean)
+      v: videos.map(function (v) {
+        if (!v.link) return null;
+        if (v.poster) return { u: v.link, p: v.poster };
+        return v.link;
+      }).filter(Boolean)
     };
     var photo = p.photo || src.photo || null;
     if (includePhoto && photo && photo.length <= PHOTO_SHARE_MAX) data.ph = photo;
@@ -197,9 +250,12 @@
       levelId: raw.lv,
       score: raw.sc || 0,
       photo: raw.ph || null,
-      videos: (raw.v || []).map(function (link, i) {
-        return { id: "link-" + i, name: "סרטון " + (i + 1), link: link, objectUrl: null };
-      })
+      videos: (raw.v || []).map(function (item, i) {
+        var link = typeof item === "string" ? item : (item && (item.u || item.link)) || "";
+        var poster = typeof item === "object" && item ? (item.p || item.poster || "") : "";
+        if (!poster) poster = posterFromCloudinary(link);
+        return { id: "link-" + i, name: "סרטון " + (i + 1), link: link, poster: poster, objectUrl: null };
+      }).filter(function (v) { return v.link; })
     };
   }
 
@@ -720,32 +776,30 @@
 
   function renderVideoList(targetId, videos, editable) {
     var box = $(targetId);
+    if (!box) return;
     if (!videos || !videos.length) { box.innerHTML = ""; return; }
     box.innerHTML = "";
     videos.forEach(function (v) {
-      var item = document.createElement("div");
-      item.className = "video-item";
-      if (v.objectUrl) {
-        var vid = document.createElement("video");
-        vid.controls = true;
-        vid.preload = "metadata";
-        vid.src = v.objectUrl;
-        item.appendChild(vid);
-      } else if (v.link) {
-        var a = document.createElement("a");
-        a.className = "link-row";
-        a.href = v.link;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        a.textContent = v.link;
-        item.appendChild(a);
+      var wrap = document.createElement("div");
+      wrap.className = "video-item-wrap";
+      if (v.uploading) {
+        wrap.innerHTML = '<div class="video-item is-uploading"><div class="ut-video-poster ut-video-fallback"></div></div>';
+      } else {
+        wrap.innerHTML = videoTileHtml(v);
       }
       var meta = document.createElement("div");
       meta.className = "meta";
+      var bits = [v.name || "סרטון"];
+      if (v.uploading) bits = ["מעלה את " + (v.name || "הסרטון") + "…"];
+      else {
+        if (v.duration) bits.push(formatDuration(v.duration));
+        if (v.bytes) bits.push(formatBytes(v.bytes));
+        if (v.link && isCloudinaryVideo(v.link)) bits.push("נשמר בכרטיס");
+      }
       var label = document.createElement("span");
-      label.textContent = v.name + (v.link ? "" : " · נשמר במכשיר זה בלבד");
+      label.textContent = bits.join(" · ");
       meta.appendChild(label);
-      if (editable) {
+      if (editable && !v.uploading) {
         var rm = document.createElement("button");
         rm.type = "button";
         rm.className = "text-btn";
@@ -758,27 +812,138 @@
         });
         meta.appendChild(rm);
       }
-      item.appendChild(meta);
-      box.appendChild(item);
+      wrap.appendChild(meta);
+      box.appendChild(wrap);
+    });
+  }
+
+  function finishedVideoCount() {
+    return state.videos.filter(function (v) { return !v.uploading; }).length;
+  }
+
+  function setUploadProgress(show, ratio, label) {
+    var wrap = $("upload-progress");
+    var bar = $("upload-progress-bar");
+    var text = $("upload-progress-label");
+    if (!wrap) return;
+    wrap.classList.toggle("hidden", !show);
+    if (bar) bar.style.width = Math.round((ratio || 0) * 100) + "%";
+    if (text) text.textContent = label || "מעלה את הסרטון…";
+  }
+
+  function readVideoDuration(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var el = document.createElement("video");
+      el.preload = "metadata";
+      var done = false;
+      var finish = function (fn, val) {
+        if (done) return;
+        done = true;
+        URL.revokeObjectURL(url);
+        fn(val);
+      };
+      el.onloadedmetadata = function () { finish(resolve, el.duration); };
+      el.onerror = function () { finish(reject, new Error("meta")); };
+      setTimeout(function () { finish(reject, new Error("meta-timeout")); }, 8000);
+      el.src = url;
+    });
+  }
+
+  function uploadToCloudinary(file, onProgress) {
+    return new Promise(function (resolve, reject) {
+      var fd = new FormData();
+      fd.append("file", file);
+      fd.append("upload_preset", CLOUDINARY.uploadPreset);
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", "https://api.cloudinary.com/v1_1/" + CLOUDINARY.cloudName + "/video/upload");
+      xhr.upload.onprogress = function (ev) {
+        if (ev.lengthComputable && onProgress) onProgress(ev.loaded / ev.total);
+      };
+      xhr.onload = function () {
+        var json = null;
+        try { json = JSON.parse(xhr.responseText); } catch (err) { reject(new Error("parse")); return; }
+        if (xhr.status >= 200 && xhr.status < 300 && json && json.secure_url) resolve(json);
+        else reject(new Error((json && json.error && json.error.message) || "upload"));
+      };
+      xhr.onerror = function () { reject(new Error("network")); };
+      xhr.send(fd);
     });
   }
 
   function addVideoFiles(files) {
-    Array.from(files || []).slice(0, 3).forEach(function (file) {
-      if (!file.type.startsWith("video/")) return;
-      var id = "vid-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-      var objectUrl = URL.createObjectURL(file);
-      videoBlobs.set(id, file);
-      state.videos.push({ id: id, name: file.name, objectUrl: objectUrl, link: "", localOnly: true });
+    var list = Array.from(files || []);
+    if (!list.length) return;
+    (function next(i) {
+      if (i >= list.length) return;
+      addOneVideoFile(list[i]).then(function () { next(i + 1); }, function () { next(i + 1); });
+    })(0);
+  }
+
+  function addOneVideoFile(file) {
+    if (!file) return Promise.resolve();
+    if (finishedVideoCount() >= CLOUDINARY.maxVideos) {
+      showToast("אפשר להוסיף עד 3 סרטונים לכרטיס");
+      return Promise.resolve();
+    }
+    if (file.type && file.type.indexOf("video/") !== 0) {
+      showToast("יש לבחור קובץ וידאו");
+      return Promise.resolve();
+    }
+    if (file.size > CLOUDINARY.maxBytes) {
+      showToast("הקובץ גדול מדי. הגודל המרבי הוא 100MB");
+      return Promise.resolve();
+    }
+    return readVideoDuration(file).then(function (duration) {
+      if (isFinite(duration) && duration > CLOUDINARY.maxDuration) {
+        showToast("משך הסרטון ארוך מדי. המקסימום הוא 3 דקות");
+        return;
+      }
+      return startCloudinaryUpload(file, duration);
+    }, function () {
+      showToast("לא ניתן לקרוא את משך הסרטון. נסו קובץ אחר");
     });
-    persist();
+  }
+
+  function startCloudinaryUpload(file, duration) {
+    var id = "vid-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+    var temp = { id: id, name: file.name, uploading: true, progress: 0, duration: duration || 0, bytes: file.size, link: "", poster: "", objectUrl: null };
+    state.videos.push(temp);
     renderVideoList("video-list", state.videos, true);
+    setUploadProgress(true, 0, "מעלה את הסרטון… 0%");
+    return uploadToCloudinary(file, function (ratio) {
+      temp.progress = ratio;
+      setUploadProgress(true, ratio, "מעלה את הסרטון… " + Math.round(ratio * 100) + "%");
+    }).then(function (res) {
+      var poster = posterFromCloudinary(res.secure_url);
+      temp.uploading = false;
+      temp.link = res.secure_url;
+      temp.poster = poster;
+      temp.duration = res.duration || duration || 0;
+      temp.bytes = res.bytes || file.size;
+      temp.publicId = res.public_id || "";
+      persist();
+      renderVideoList("video-list", state.videos, true);
+      setUploadProgress(true, 1, "הסרטון הועלה לכרטיס");
+      showToast("הסרטון הועלה לכרטיס");
+      setTimeout(function () { setUploadProgress(false, 0); }, 1600);
+    }, function (err) {
+      state.videos = state.videos.filter(function (x) { return x.id !== id; });
+      renderVideoList("video-list", state.videos, true);
+      setUploadProgress(false, 0);
+      showToast("ההעלאה נכשלה. נסו שוב");
+      console.warn("cloudinary upload failed", err);
+    });
   }
 
   function addVideoLink() {
     var input = $("video-link");
     var url = (input.value || "").trim();
     if (!url) return;
+    if (finishedVideoCount() >= CLOUDINARY.maxVideos) {
+      showToast("אפשר להוסיף עד 3 סרטונים לכרטיס");
+      return;
+    }
     try {
       var parsed = new URL(url);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
@@ -787,7 +952,13 @@
       showToast("הזינו קישור תקין שמתחיל ב-https");
       return;
     }
-    state.videos.push({ id: "link-" + Date.now(), name: "קישור לסרטון", link: url, objectUrl: null });
+    state.videos.push({
+      id: "link-" + Date.now(),
+      name: "קישור לסרטון",
+      link: url,
+      poster: posterFromCloudinary(url),
+      objectUrl: null
+    });
     input.value = "";
     persist();
     renderVideoList("video-list", state.videos, true);
@@ -967,18 +1138,10 @@
       }, false) + "</div>";
     }
 
-    var videos = card.videos || [];
+    var videos = (card.videos || []).filter(function (v) { return v.link || v.objectUrl; });
     var vidHtml = '<p class="ut-section">סרטוני משחק</p>';
     if (videos.length) {
-      vidHtml += '<div class="video-list">';
-      videos.forEach(function (v) {
-        if (v.link) {
-          vidHtml += '<div class="video-item"><a class="link-row" href="' + escapeHtml(v.link) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(v.link) + "</a></div>";
-        } else if (v.objectUrl) {
-          vidHtml += '<div class="video-item"><video controls preload="metadata" src="' + v.objectUrl + '"></video></div>';
-        }
-      });
-      vidHtml += "</div>";
+      vidHtml += '<div class="video-list">' + videos.map(videoTileHtml).join("") + "</div>";
     } else if (!opts.compact) {
       vidHtml += '<p class="empty-videos">עדיין אין סרטונים בכרטיס.</p>';
     } else {
@@ -1228,6 +1391,26 @@
       go("share");
     });
     $("pair-back-card").addEventListener("click", function () { go("card"); });
+    document.addEventListener("click", function (ev) {
+      var tile = ev.target.closest(".ut-video-tile");
+      if (!tile || tile.querySelector("video")) return;
+      if (!ev.target.closest(".ut-play-btn, .ut-video-poster, .ut-video-tile")) return;
+      ev.preventDefault();
+      var src = tile.getAttribute("data-src");
+      if (!src) return;
+      var poster = tile.getAttribute("data-poster") || "";
+      var vid = document.createElement("video");
+      vid.controls = true;
+      vid.autoplay = true;
+      vid.playsInline = true;
+      vid.preload = "metadata";
+      if (poster) vid.poster = poster;
+      vid.src = src;
+      tile.innerHTML = "";
+      tile.appendChild(vid);
+      var play = vid.play();
+      if (play && play.catch) play.catch(function () {});
+    });
     window.addEventListener("hashchange", render);
   }
 

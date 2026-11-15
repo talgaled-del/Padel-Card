@@ -257,12 +257,16 @@
         </div>
         <div class="field">
           <span class="legend">סרטוני משחק</span>
-          <p class="note">העלו סרטון מהמכשיר להתרשמות ראשונית, או הוסיפו קישור (יוטיוב, גוגל דרייב וכו'). באבטיפוס, קבצים שהועלו נשמרים במכשיר הזה בלבד ולא נוסעים עם הקישור המשותף. קישור חיצוני כן יישמר בכרטיס שאפשר לשתף.</p>
+          <p class="note">העלו סרטון משחק מהגלריה או מהמצלמה (עד 3 סרטונים, עד 100MB ו־3 דקות לכל אחד). הסרטון נשמר בענן ויופיע בקישור המשותף. אפשר גם להוסיף קישור חיצוני (יוטיוב, גוגל דרייב וכו').</p>
           <label class="upload">
             <input id="video-file" type="file" accept="video/*" multiple />
             <strong>העלאת סרטון מהמכשיר</strong>
-            <span class="note">עד שלושה קבצים בבת אחת</span>
+            <span class="note">נפתח הגלריה או המצלמה בטלפון · עד 3 סרטונים</span>
           </label>
+          <div class="upload-progress hidden" id="upload-progress" aria-live="polite">
+            <div class="upload-progress-track"><div class="upload-progress-bar" id="upload-progress-bar"></div></div>
+            <span id="upload-progress-label">מעלה את הסרטון…</span>
+          </div>
           <div class="link-add" style="margin-top:8px">
             <input id="video-link" type="url" dir="ltr" placeholder="https://" />
             <button class="btn btn-ghost" id="add-link" type="button" style="width:auto;padding:12px 16px">הוספה</button>
