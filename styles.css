@@ -1074,7 +1074,11 @@ input[type="url"],
   background: #000;
   border-radius: 16px;
   overflow: hidden;
+  isolation: isolate;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
+.track-stage img,
 .track-stage video,
 .track-stage canvas {
   position: absolute;
@@ -1084,7 +1088,29 @@ input[type="url"],
   object-fit: contain;
   display: block;
 }
-.track-stage canvas { z-index: 1; touch-action: manipulation; cursor: pointer; }
+.track-stage img { z-index: 0; background: #000; }
+.track-stage video {
+  z-index: 1;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+.track-stage canvas {
+  z-index: 2;
+  touch-action: manipulation;
+  cursor: pointer;
+  transform: translate3d(0, 0, 1px);
+  -webkit-transform: translate3d(0, 0, 1px);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+.track-status {
+  margin: 8px 0 0;
+  color: #d8f38a;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.track-status.hidden { display: none; }
 .track-scrub {
   display: grid;
   gap: 6px;
@@ -1123,6 +1149,10 @@ input[type="url"],
   width: 100%;
   background: #000;
   aspect-ratio: 16 / 9;
+  isolation: isolate;
+  overflow: hidden;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 .vp-shell.is-expanded .vp-stage {
   flex: 1;
@@ -1138,7 +1168,19 @@ input[type="url"],
   object-fit: contain;
   display: block;
 }
-.vp-stage canvas { pointer-events: none; z-index: 1; }
+.vp-stage video {
+  z-index: 0;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+.vp-stage canvas {
+  pointer-events: none;
+  z-index: 2;
+  transform: translate3d(0, 0, 1px);
+  -webkit-transform: translate3d(0, 0, 1px);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
 .vp-bar {
   display: flex;
   align-items: center;

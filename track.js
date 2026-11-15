@@ -1,57 +1,157 @@
 (function (global) {
   var MODEL = null;
   var loading = null;
+  var detectorFailed = false;
+  var detectorStatus = "idle";
   var TF_SRC = "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js";
   var COCO_SRC = "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js";
   var DEFAULT_INTERVAL = 0.28;
   var HOLD_SEC = 4;
   var DEFAULT_R = 0.12;
+  var DETECT_MAX = 640;
+  var DETECTOR_TIMEOUT_MS = 14000;
+  var PERSON_SCORE = 0.28;
+  var TMPL_SIZE = 32;
 
-  function loadScript(src) {
+  function withTimeout(promise, ms, label) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        reject(new Error(label || "timeout"));
+      }, ms);
+      promise.then(function (value) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(value);
+      }, function (err) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  function loadScript(src, ms) {
     return new Promise(function (resolve, reject) {
       if (src.indexOf("tf.min") >= 0 && global.tf) return resolve();
       if (src.indexOf("coco-ssd") >= 0 && global.cocoSsd) return resolve();
       var existing = document.querySelector('script[data-padel-src="' + src + '"]');
+      var finish = function (err) {
+        if (err) reject(err);
+        else resolve();
+      };
       if (existing) {
-        existing.addEventListener("load", function () { resolve(); });
-        existing.addEventListener("error", function () { reject(new Error("script")); });
+        if (existing.getAttribute("data-padel-loaded") === "1") return resolve();
+        existing.addEventListener("load", function () { finish(); });
+        existing.addEventListener("error", function () { finish(new Error("script")); });
+        setTimeout(function () { finish(new Error("script-timeout")); }, ms || 10000);
         return;
       }
       var el = document.createElement("script");
       el.src = src;
       el.async = true;
       el.setAttribute("data-padel-src", src);
-      el.onload = function () { resolve(); };
-      el.onerror = function () { reject(new Error("script")); };
+      el.onload = function () {
+        el.setAttribute("data-padel-loaded", "1");
+        finish();
+      };
+      el.onerror = function () { finish(new Error("script")); };
       document.head.appendChild(el);
+      setTimeout(function () { finish(new Error("script-timeout")); }, ms || 10000);
     });
   }
 
-  function loadDetector() {
+  function setStatus(onStatus, text, state) {
+    detectorStatus = state || detectorStatus;
+    if (onStatus) onStatus(text, detectorStatus);
+  }
+
+  function tryBackend(name, ms) {
+    if (!global.tf || !tf.setBackend) return Promise.reject(new Error("tf"));
+    return withTimeout(
+      tf.setBackend(name).then(function (ok) {
+        if (!ok) throw new Error("backend-false");
+        return tf.ready();
+      }),
+      ms || 4000,
+      "backend-" + name
+    );
+  }
+
+  function loadModel(base) {
+    if (!global.cocoSsd) throw new Error("coco");
+    return cocoSsd.load({ base: base });
+  }
+
+  function loadDetector(onStatus) {
     if (MODEL) return Promise.resolve(MODEL);
+    if (detectorFailed && !loading) {
+      return Promise.reject(new Error("detector-unavailable"));
+    }
     if (loading) return loading;
-    loading = loadScript(TF_SRC).then(function () {
-      if (global.tf && tf.ready) return tf.ready();
-    }).then(function () {
-      if (!global.tf || !tf.setBackend) return;
-      return tf.setBackend("webgl").then(function (ok) {
-        if (!ok) return tf.setBackend("cpu");
-      }).catch(function () {
-        return tf.setBackend("cpu");
-      }).then(function () { return tf.ready(); });
-    }).then(function () {
-      return loadScript(COCO_SRC);
-    }).then(function () {
-      if (!global.cocoSsd) throw new Error("coco");
-      return cocoSsd.load({ base: "lite_mobilenet_v2" });
-    }).then(function (model) {
-      MODEL = model;
-      return model;
-    }).catch(function (err) {
+    setStatus(onStatus, "טוען את מזהה השחקנים…", "loading");
+    var started = Date.now();
+    loading = withTimeout(
+      loadScript(TF_SRC, 10000).then(function () {
+        setStatus(onStatus, "מכין את מנוע הזיהוי…", "loading");
+        if (global.tf && tf.ready) return withTimeout(tf.ready(), 4000, "tf-ready");
+      }).then(function () {
+        return tryBackend("webgl", 4000).catch(function () {
+          return tryBackend("cpu", 4000);
+        });
+      }).then(function () {
+        setStatus(onStatus, "טוען את מודל הזיהוי…", "loading");
+        return loadScript(COCO_SRC, 10000);
+      }).then(function () {
+        var remain = Math.max(4000, DETECTOR_TIMEOUT_MS - (Date.now() - started));
+        var backend = (global.tf && tf.getBackend && tf.getBackend()) || "cpu";
+        var first = backend === "webgl" ? "mobilenet_v2" : "lite_mobilenet_v2";
+        var second = first === "mobilenet_v2" ? "lite_mobilenet_v2" : "mobilenet_v2";
+        setStatus(onStatus, "טוען את מודל הזיהוי…", "loading");
+        return withTimeout(loadModel(first), Math.min(remain, 9000), "model-" + first).catch(function () {
+          remain = Math.max(3500, DETECTOR_TIMEOUT_MS - (Date.now() - started));
+          return withTimeout(loadModel(second), remain, "model-" + second);
+        });
+      }).then(function (model) {
+        MODEL = model;
+        detectorFailed = false;
+        detectorStatus = "ready";
+        setStatus(onStatus, "", "ready");
+        return model;
+      }),
+      DETECTOR_TIMEOUT_MS,
+      "detector-timeout"
+    ).catch(function (err) {
       loading = null;
+      MODEL = null;
+      detectorFailed = true;
+      detectorStatus = "failed";
+      setStatus(onStatus, "", "failed");
       throw err;
     });
     return loading;
+  }
+
+  function getDetectorState() {
+    return {
+      status: detectorStatus,
+      ready: !!MODEL,
+      failed: detectorFailed
+    };
+  }
+
+  function isCanvasTainted(canvas) {
+    if (!canvas || !canvas.getContext) return false;
+    try {
+      canvas.getContext("2d").getImageData(0, 0, 1, 1);
+      return false;
+    } catch (err) {
+      return true;
+    }
   }
 
   function sourceSize(source) {
@@ -73,6 +173,7 @@
         canvas.height = sh;
         canvas.getContext("2d").drawImage(source, 0, 0, sw, sh);
       }
+      if (isCanvasTainted(canvas)) return null;
       var ctx = canvas.getContext("2d");
       var sx = Math.max(0, Math.round(x + w * 0.25));
       var sy = Math.max(0, Math.round(y + h * 0.15));
@@ -99,27 +200,214 @@
     return Math.min(1, Math.hypot(a.r - c.r, a.g - c.g, a.b - c.b) / 260);
   }
 
-  function detectPeople(source) {
-    return loadDetector().then(function (model) {
-      return model.detect(source, 8);
-    }).then(function (preds) {
-      var size = sourceSize(source);
+  function grabFrame(video, maxW) {
+    var vw = video.videoWidth || video.width || 1;
+    var vh = video.videoHeight || video.height || 1;
+    var w = Math.min(maxW || DETECT_MAX, vw);
+    w = Math.max(320, w);
+    if (vw < w) w = vw;
+    var h = Math.max(1, Math.round(vh * (w / vw)));
+    var c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    var ctx = c.getContext("2d");
+    ctx.drawImage(video, 0, 0, w, h);
+    return c;
+  }
+
+  function cropSource(source, sx, sy, sw, sh, maxEdge) {
+    var scale = Math.min(1, (maxEdge || DETECT_MAX) / Math.max(sw, sh));
+    var c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(sw * scale));
+    c.height = Math.max(1, Math.round(sh * scale));
+    c.getContext("2d").drawImage(source, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  function runDetect(model, canvas) {
+    return model.detect(canvas, 12).then(function (preds) {
       return (preds || []).filter(function (p) {
-        return p.class === "person" && p.score >= 0.35;
-      }).map(function (p) {
-        var b = p.bbox;
-        return {
-          x: b[0] / size.w,
-          y: b[1] / size.h,
-          w: b[2] / size.w,
-          h: b[3] / size.h,
-          score: p.score,
-          color: meanColor(source, b[0], b[1], b[2], b[3])
-        };
-      }).filter(function (b) {
-        return b.w > 0.015 && b.h > 0.03 && b.w < 0.95 && b.h < 0.98;
+        return p.class === "person" && p.score >= PERSON_SCORE;
       });
     });
+  }
+
+  function predToBox(p, size, source) {
+    var b = p.bbox;
+    return {
+      x: b[0] / size.w,
+      y: b[1] / size.h,
+      w: b[2] / size.w,
+      h: b[3] / size.h,
+      score: p.score,
+      color: meanColor(source, b[0], b[1], b[2], b[3])
+    };
+  }
+
+  function filterBoxes(boxes) {
+    return (boxes || []).filter(function (b) {
+      return b.w > 0.01 && b.h > 0.018 && b.w < 0.95 && b.h < 0.98;
+    });
+  }
+
+  function mergeBoxes(boxes) {
+    var list = (boxes || []).slice().sort(function (a, b) { return (b.score || 0) - (a.score || 0); });
+    var out = [];
+    var i, j;
+    for (i = 0; i < list.length; i++) {
+      var keep = true;
+      for (j = 0; j < out.length; j++) {
+        if (iou(list[i], out[j]) >= 0.45) {
+          keep = false;
+          break;
+        }
+      }
+      if (keep) out.push(list[i]);
+    }
+    return filterBoxes(out);
+  }
+
+  function detectOnCanvas(model, canvas) {
+    return runDetect(model, canvas).then(function (preds) {
+      var size = { w: canvas.width, h: canvas.height };
+      return filterBoxes(preds.map(function (p) { return predToBox(p, size, canvas); }));
+    });
+  }
+
+  function detectFromVideo(model, video) {
+    var vw = video.videoWidth || 1;
+    var vh = video.videoHeight || 1;
+    var full = grabFrame(video, DETECT_MAX);
+    if (isCanvasTainted(full)) {
+      var err = new Error("tainted");
+      err.code = "tainted";
+      return Promise.reject(err);
+    }
+    return detectOnCanvas(model, full).then(function (boxes) {
+      var small = !boxes.length || boxes.every(function (b) { return b.h < 0.22 && b.w < 0.2; });
+      var wide = vw >= 800;
+      var needTiles = boxes.length < 3 || (wide && small);
+      if (!needTiles) return boxes;
+      var cols = vw >= 800 ? 2 : 1;
+      var rows = vh >= 500 ? 2 : 1;
+      if (cols * rows === 1) return boxes;
+      var overlap = 0.22;
+      var tileW = vw / (cols - (cols - 1) * overlap);
+      var tileH = vh / (rows - (rows - 1) * overlap);
+      var jobs = [];
+      var meta = [];
+      var r, c, sx, sy, sw, sh, canvas;
+      for (r = 0; r < rows; r++) {
+        for (c = 0; c < cols; c++) {
+          sx = Math.max(0, Math.round(c * tileW * (1 - overlap)));
+          sy = Math.max(0, Math.round(r * tileH * (1 - overlap)));
+          sw = Math.min(tileW, vw - sx);
+          sh = Math.min(tileH, vh - sy);
+          canvas = cropSource(video, sx, sy, sw, sh, DETECT_MAX);
+          jobs.push(runDetect(model, canvas));
+          meta.push({ sx: sx, sy: sy, sw: sw, sh: sh, cw: canvas.width, ch: canvas.height, canvas: canvas });
+        }
+      }
+      return Promise.all(jobs).then(function (results) {
+        var all = boxes.slice();
+        results.forEach(function (preds, i) {
+          var m = meta[i];
+          (preds || []).forEach(function (p) {
+            var b = p.bbox;
+            var x = m.sx + (b[0] / m.cw) * m.sw;
+            var y = m.sy + (b[1] / m.ch) * m.sh;
+            var w = (b[2] / m.cw) * m.sw;
+            var h = (b[3] / m.ch) * m.sh;
+            all.push({
+              x: x / vw,
+              y: y / vh,
+              w: w / vw,
+              h: h / vh,
+              score: p.score,
+              color: meanColor(m.canvas, b[0], b[1], b[2], b[3])
+            });
+          });
+        });
+        return mergeBoxes(all);
+      });
+    });
+  }
+
+  function detectPeople(source) {
+    if (detectorFailed && !MODEL) return Promise.resolve([]);
+    return loadDetector().then(function (model) {
+      if (!model) return [];
+      if (source && source.videoWidth) return detectFromVideo(model, source);
+      return detectOnCanvas(model, source);
+    }).catch(function (err) {
+      if (err && err.code === "tainted") throw err;
+      return [];
+    });
+  }
+
+  function makeTemplate(frame, box) {
+    if (!frame || !box || isCanvasTainted(frame)) return null;
+    var fw = frame.width;
+    var fh = frame.height;
+    var x = (box.x || 0) * fw;
+    var y = (box.y || 0) * fh;
+    var w = Math.max(8, (box.w || 0.08) * fw);
+    var h = Math.max(8, (box.h || 0.08) * fh);
+    var sx = Math.max(0, Math.round(x + w * 0.18));
+    var sy = Math.max(0, Math.round(y + h * 0.12));
+    var sw = Math.max(8, Math.round(w * 0.64));
+    var sh = Math.max(8, Math.round(h * 0.7));
+    if (sx + sw > fw) sw = Math.max(8, fw - sx);
+    if (sy + sh > fh) sh = Math.max(8, fh - sy);
+    var c = document.createElement("canvas");
+    c.width = TMPL_SIZE;
+    c.height = TMPL_SIZE;
+    c.getContext("2d").drawImage(frame, sx, sy, sw, sh, 0, 0, TMPL_SIZE, TMPL_SIZE);
+    return { canvas: c, w: sw / fw, h: sh / fh, color: meanColor(frame, sx, sy, sw, sh) };
+  }
+
+  function matchTemplate(frame, tmpl, cx, cy, searchR) {
+    if (!frame || !tmpl || !tmpl.canvas || isCanvasTainted(frame)) return null;
+    var fw = frame.width;
+    var fh = frame.height;
+    var tw = Math.max(8, Math.round((tmpl.w || 0.08) * fw));
+    var th = Math.max(8, Math.round((tmpl.h || 0.1) * fh));
+    var radius = (searchR || 0.14) * fw;
+    var steps = 7;
+    var best = null;
+    var bestSad = Infinity;
+    var tdata;
+    try { tdata = tmpl.canvas.getContext("2d").getImageData(0, 0, TMPL_SIZE, TMPL_SIZE).data; }
+    catch (err) { return null; }
+    var tmp = document.createElement("canvas");
+    tmp.width = TMPL_SIZE;
+    tmp.height = TMPL_SIZE;
+    var tctx = tmp.getContext("2d");
+    var iy, ix, px, py, d, sad, i, mean;
+    for (iy = 0; iy < steps; iy++) {
+      for (ix = 0; ix < steps; ix++) {
+        px = (cx * fw) + ((ix / (steps - 1)) - 0.5) * 2 * radius - tw / 2;
+        py = (cy * fh) + ((iy / (steps - 1)) - 0.5) * 2 * radius * (fh / fw) - th / 2;
+        px = Math.max(0, Math.min(fw - tw, px));
+        py = Math.max(0, Math.min(fh - th, py));
+        tctx.drawImage(frame, px, py, tw, th, 0, 0, TMPL_SIZE, TMPL_SIZE);
+        try { d = tctx.getImageData(0, 0, TMPL_SIZE, TMPL_SIZE).data; }
+        catch (err) { return null; }
+        sad = 0;
+        for (i = 0; i < d.length; i += 4) {
+          sad += Math.abs(d[i] - tdata[i]) + Math.abs(d[i + 1] - tdata[i + 1]) + Math.abs(d[i + 2] - tdata[i + 2]);
+        }
+        if (sad < bestSad) {
+          bestSad = sad;
+          best = { x: px / fw, y: py / fh, w: tw / fw, h: th / fh };
+        }
+      }
+    }
+    mean = bestSad / (TMPL_SIZE * TMPL_SIZE * 3);
+    if (!best || mean > 58) return null;
+    best.color = meanColor(frame, best.x * fw, best.y * fh, best.w * fw, best.h * fh);
+    best.score = Math.max(0, 1 - mean / 58);
+    return best;
   }
 
   function boxCenter(b) {
@@ -205,19 +493,6 @@
     });
   }
 
-  function grabFrame(video, maxW) {
-    var vw = video.videoWidth || 1;
-    var vh = video.videoHeight || 1;
-    var w = Math.min(maxW || 416, vw);
-    var h = Math.max(1, Math.round(vh * (w / vw)));
-    var c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    var ctx = c.getContext("2d");
-    ctx.drawImage(video, 0, 0, w, h);
-    return c;
-  }
-
   function playTo(video, t) {
     return new Promise(function (resolve) {
       var target = Math.max(0, t || 0);
@@ -251,17 +526,36 @@
     });
   }
 
-  function collectDetections(video, interval, onProgress, shouldCancel) {
+
+  function collectDetections(video, interval, onProgress, shouldCancel, opts) {
+    opts = opts || {};
     var duration = isFinite(video.duration) ? video.duration : 0;
     var step = interval || DEFAULT_INTERVAL;
     var samples = [];
+    var startBox = opts.startBox || null;
+    var template = null;
+    var pred = startBox ? boxCenter(startBox) : { x: 0.5, y: 0.5 };
+    var useDetect = !!MODEL && !detectorFailed;
     video.muted = true;
     video.pause();
     function capture(actual) {
       if (shouldCancel && shouldCancel()) return Promise.resolve(samples);
-      var frame = grabFrame(video, 416);
-      return detectPeople(frame).then(function (boxes) {
-        samples.push({ t: actual, boxes: boxes });
+      var frame = grabFrame(video, DETECT_MAX);
+      var tainted = isCanvasTainted(frame);
+      if (tainted) {
+        samples.push({ t: actual, boxes: [], tmpl: null, tainted: true });
+        return Promise.resolve(samples);
+      }
+      if (!template && startBox) template = makeTemplate(frame, startBox);
+      var detectPromise = useDetect ? detectPeople(video).catch(function () { return []; }) : Promise.resolve([]);
+      return detectPromise.then(function (boxes) {
+        var tmpl = template ? matchTemplate(frame, template, pred.x, pred.y, 0.16) : null;
+        if (tmpl) pred = boxCenter(tmpl);
+        else if (boxes && boxes.length && startBox) {
+          var m = matchBox(startBox, boxes, step, null);
+          if (m) pred = boxCenter(m);
+        }
+        samples.push({ t: actual, boxes: boxes || [], tmpl: tmpl, tainted: false });
         if (onProgress) {
           var ratio = duration ? Math.min(1, (actual + step) / duration) : 0;
           onProgress(ratio, samples.length);
@@ -296,8 +590,9 @@
         closest = i;
       }
     }
-    var boxes0 = samples[closest].boxes || [];
-    var current = matchBox(startBox, boxes0, 0, null) || startBox;
+    var sample0 = samples[closest];
+    var boxes0 = sample0.boxes || [];
+    var current = matchBox(startBox, boxes0, 0, null) || sample0.tmpl || startBox;
     var keyframes = [];
     var vel = { x: 0, y: 0 };
     var misses = 0;
@@ -309,6 +604,15 @@
 
     emit(samples[closest], current, false);
 
+    function acceptTemplate(prevBox, tmpl) {
+      if (!tmpl) return null;
+      var pc = boxCenter(prevBox);
+      var tc = boxCenter(tmpl);
+      var dist = Math.hypot(tc.x - pc.x, tc.y - pc.y);
+      if (dist > 0.24) return null;
+      return tmpl;
+    }
+
     function walk(from, to, dir) {
       var prevBox = current;
       var prevT = samples[from].t;
@@ -318,6 +622,7 @@
         var sample = samples[idx];
         var dt = Math.abs(sample.t - prevT) || DEFAULT_INTERVAL;
         var matched = matchBox(prevBox, sample.boxes || [], dt, prevVel);
+        if (!matched) matched = acceptTemplate(prevBox, sample.tmpl);
         if (matched) {
           var pc = boxCenter(prevBox);
           var mc = boxCenter(matched);
@@ -370,8 +675,16 @@
     var interval = opts.interval || DEFAULT_INTERVAL;
     var aspect = videoAspect(video);
     var t0 = typeof opts.t0 === "number" ? opts.t0 : (video.currentTime || 0);
-    return collectDetections(video, interval, opts.onProgress, opts.shouldCancel).then(function (samples) {
+    var ready = MODEL ? Promise.resolve(MODEL) : loadDetector().catch(function () { return null; });
+    return ready.then(function () {
+      return collectDetections(video, interval, opts.onProgress, opts.shouldCancel, { startBox: startBox });
+    }).then(function (samples) {
       if (opts.shouldCancel && opts.shouldCancel()) return null;
+      if (samples.length && samples[0].tainted) {
+        var err = new Error("tainted");
+        err.code = "tainted";
+        throw err;
+      }
       var keys = associate(samples, startBox, t0, aspect);
       var detected = 0;
       var i;
@@ -453,6 +766,7 @@
     return a + (b - a) * t;
   }
 
+
   function atTime(track, time) {
     if (!track) return null;
     var t = Math.max(0, time || 0);
@@ -465,11 +779,11 @@
     var keys = track.k || [];
     if (!keys.length) return null;
     if (t <= keys[0].t) {
-      return { x: keys[0].x, y: keys[0].y, r: keys[0].r, visible: true, fade: keys[0].c ? 1 : 0.7, static: false };
+      return { x: keys[0].x, y: keys[0].y, r: keys[0].r, visible: true, fade: keys[0].c ? 1 : 0.75, static: false };
     }
     var last = keys[keys.length - 1];
     if (t >= last.t) {
-      return { x: last.x, y: last.y, r: last.r, visible: true, fade: last.c ? 1 : 0.65, static: false };
+      return { x: last.x, y: last.y, r: last.r, visible: true, fade: last.c ? 1 : 0.7, static: false };
     }
     var lo = 0;
     var hi = keys.length - 1;
@@ -482,20 +796,13 @@
     var b = keys[hi];
     var span = Math.max(0.0001, b.t - a.t);
     var u = (t - a.t) / span;
-    var gap = span > 1.4;
     var held = !(a.c && b.c);
-    var fade = gap ? 0.45 : (held ? 0.7 : 1);
-    var holdSpan = 0;
-    if (held) {
-      var i;
-      for (i = lo; i >= 0 && !keys[i].c; i--) holdSpan = t - keys[i].t;
-    }
-    if (holdSpan > 1.1) fade = Math.max(0, 1 - (holdSpan - 1.1) / 0.5);
+    var fade = held ? 0.75 : 1;
     return {
       x: lerp(a.x, b.x, u),
       y: lerp(a.y, b.y, u),
       r: lerp(a.r, b.r, u),
-      visible: fade > 0.08,
+      visible: true,
       fade: fade,
       static: false
     };
@@ -530,14 +837,17 @@
     return DEFAULT_R;
   }
 
+
   function isUsefulTrack(track) {
     if (!track) return false;
     if (track.m && (!track.k || !track.k.length)) return true;
     var keys = track.k || [];
+    if (keys.length < 2) return false;
     var detected = 0;
     var i;
     for (i = 0; i < keys.length; i++) if (keys[i].c) detected += 1;
-    return detected >= 3;
+    if (detected >= 2) return true;
+    return keys.length >= 4;
   }
 
   function fetchTrack(url) {
@@ -549,6 +859,7 @@
       return unpack(json) || json;
     });
   }
+
 
   global.PadelTrack = {
     loadDetector: loadDetector,
@@ -566,6 +877,9 @@
     defaultRadius: defaultRadius,
     isUsefulTrack: isUsefulTrack,
     fetchTrack: fetchTrack,
-    HOLD_SEC: HOLD_SEC
+    isCanvasTainted: isCanvasTainted,
+    getDetectorState: getDetectorState,
+    HOLD_SEC: HOLD_SEC,
+    DETECT_MAX: DETECT_MAX
   };
 })(window);

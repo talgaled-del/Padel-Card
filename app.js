@@ -197,9 +197,37 @@
     return '<img class="' + cls.trim() + '" alt="' + escapeHtml(alt || "") + '" src="' + escapeHtml(src) + '">';
   }
 
+  var H264_TRANSFORM = "c_limit,w_1280,h_720,q_auto:good,vc_h264,f_mp4";
+
   function posterFromCloudinary(url) {
     if (!isCloudinaryVideo(url)) return "";
-    return url.replace("/video/upload/", "/video/upload/so_auto/").replace(/\.[a-z0-9]+(?=\?|$)/i, ".jpg");
+    var u = url.replace("/video/upload/", "/video/upload/so_auto,f_jpg/");
+    u = u.replace(/,?(vc_h264|vc_auto|f_mp4)/g, "");
+    u = u.replace(/\.(mp4|mov|m4v|webm|mkv)(\?|$)/i, ".jpg$2");
+    return u;
+  }
+
+  function playableCloudinaryUrl(url) {
+    if (!url || !isCloudinaryVideo(url)) return url || "";
+    if (/vc_h264|f_mp4/.test(url) && /\.mp4(\?|$)/i.test(url)) return url;
+    return url
+      .replace("/video/upload/", "/video/upload/" + H264_TRANSFORM + "/")
+      .replace(/\.(mov|m4v|webm|avi|mkv|hevc)(\?|$)/i, ".mp4$2");
+  }
+
+  function videoUrlFromUpload(res) {
+    if (!res) return "";
+    var eager = res.eager;
+    if (Array.isArray(eager)) {
+      var i;
+      for (i = 0; i < eager.length; i++) {
+        var item = eager[i];
+        if (item && item.secure_url && /mp4/i.test(item.format || item.secure_url || "")) {
+          return item.secure_url;
+        }
+      }
+    }
+    return playableCloudinaryUrl(res.secure_url || "");
   }
 
   function isDirectVideo(url) {
@@ -224,7 +252,7 @@
   }
 
   function videoTileHtml(v) {
-    var src = v.link || v.objectUrl || "";
+    var src = playableCloudinaryUrl(v.link || "") || v.link || v.objectUrl || "";
     var poster = v.poster || posterFromCloudinary(v.link || "");
     if (!src) return "";
     if (v.link && !isDirectVideo(v.link) && !v.objectUrl) {
@@ -947,9 +975,11 @@
       temp.progress = ratio;
       setUploadProgress(true, ratio, "מעלה את הסרטון… " + Math.round(ratio * 100) + "%");
     }, { resourceType: "video", preset: CLOUDINARY.uploadPreset, timeout: CLOUDINARY.videoTimeoutMs }).then(function (res) {
-      var poster = posterFromCloudinary(res.secure_url);
+      var playable = videoUrlFromUpload(res);
+      var poster = posterFromCloudinary(playable || res.secure_url);
       temp.uploading = false;
-      temp.link = res.secure_url;
+      temp.link = playable || res.secure_url;
+      temp.originalLink = res.secure_url || playable;
       temp.poster = poster;
       temp.duration = res.duration || duration || 0;
       temp.bytes = res.bytes || file.size;
@@ -1005,7 +1035,9 @@
     running: false,
     cancelled: false,
     frame: null,
-    detectTimer: 0
+    detectTimer: 0,
+    mode: "",
+    poster: ""
   };
   var playerState = { track: null, raf: 0, expanded: false, src: "" };
 
@@ -1043,6 +1075,145 @@
     return { left: (w - cw) / 2, top: (h - ch) / 2, w: cw, h: ch, stageW: w, stageH: h };
   }
 
+  function setPickerStatus(text) {
+    var el = $("track-picker-status");
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.toggle("hidden", !text);
+  }
+
+  function configureVideoEl(video, src, opts) {
+    opts = opts || {};
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
+    video.preload = "auto";
+    video.controls = false;
+    if (opts.poster) video.poster = opts.poster;
+    else video.removeAttribute("poster");
+    if (/^https?:/i.test(src || "")) {
+      video.crossOrigin = "anonymous";
+      video.setAttribute("crossorigin", "anonymous");
+    } else {
+      video.removeAttribute("crossorigin");
+      try { video.crossOrigin = null; } catch (err) {}
+    }
+    if (src) video.src = src;
+    try { video.load(); } catch (err) {}
+  }
+
+  function videoHasFrame(video) {
+    return !!(video && video.videoWidth > 0 && video.readyState >= 2);
+  }
+
+  function kickVideoFrame(video, keepPlaying) {
+    return new Promise(function (resolve) {
+      var play = null;
+      try {
+        if (!keepPlaying) video.muted = true;
+        play = video.play();
+      } catch (err) {}
+      var finish = function () {
+        if (!keepPlaying) {
+          try { video.pause(); } catch (err2) {}
+        }
+        resolve(videoHasFrame(video));
+      };
+      if (play && play.then) {
+        play.then(function () {
+          setTimeout(finish, 180);
+        }).catch(function () { resolve(videoHasFrame(video)); });
+      } else {
+        setTimeout(finish, 180);
+      }
+    });
+  }
+
+  function waitForVideoFrame(video, fallbackSrc, keepPlaying) {
+    return new Promise(function (resolve) {
+      var settled = false;
+      var triedFallback = false;
+      var finish = function () {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(videoHasFrame(video));
+      };
+      var onMeta = function () {
+        var start = 0.1;
+        if (isFinite(video.duration) && video.duration > 0) {
+          start = Math.min(0.12, Math.max(0.04, video.duration * 0.02));
+        }
+        try { video.currentTime = start; } catch (err) {}
+      };
+      var onReady = function () {
+        if (videoHasFrame(video)) {
+          kickVideoFrame(video, keepPlaying).then(finish);
+        }
+      };
+      var cleanup = function () {
+        video.removeEventListener("loadedmetadata", onMeta);
+        video.removeEventListener("loadeddata", onReady);
+        video.removeEventListener("seeked", onReady);
+        video.removeEventListener("canplay", onReady);
+        video.removeEventListener("error", onError);
+      };
+      var onError = function () { tryFallback(); };
+      var tryFallback = function () {
+        if (triedFallback || !fallbackSrc || video.src === fallbackSrc) {
+          if (!settled) kickVideoFrame(video, keepPlaying).then(finish);
+          return;
+        }
+        triedFallback = true;
+        configureVideoEl(video, fallbackSrc, { poster: video.poster || "" });
+      };
+      video.addEventListener("loadedmetadata", onMeta);
+      video.addEventListener("loadeddata", onReady);
+      video.addEventListener("seeked", onReady);
+      video.addEventListener("canplay", onReady);
+      video.addEventListener("error", onError);
+      if (video.readyState >= 1) onMeta();
+      if (videoHasFrame(video)) onReady();
+      setTimeout(function () {
+        if (settled) return;
+        kickVideoFrame(video, keepPlaying).then(function (ok) {
+          if (ok) finish();
+          else tryFallback();
+          setTimeout(finish, 2200);
+        });
+      }, 1600);
+    });
+  }
+
+  function updatePickerPoster(posterUrl, showVideo) {
+    var img = $("track-picker-poster");
+    var video = $("track-picker-video");
+    var hasFrame = !!showVideo || videoHasFrame(video);
+    var posterReady = !!(img && posterUrl && img.complete && img.naturalWidth);
+    if (img) {
+      if (posterUrl && img.getAttribute("src") !== posterUrl) {
+        img.onload = function () {
+          if (!videoHasFrame(video)) {
+            img.classList.remove("hidden");
+            if (video) video.style.opacity = "0";
+          }
+        };
+        img.src = posterUrl;
+      }
+      if (!posterUrl) {
+        img.removeAttribute("src");
+        img.classList.add("hidden");
+      } else {
+        img.classList.toggle("hidden", hasFrame || !posterReady);
+      }
+    }
+    if (video) {
+      video.style.opacity = hasFrame || !posterReady ? "1" : "0";
+    }
+  }
+
   function setTrackProgress(show, ratio, label) {
     var wrap = $("track-progress");
     var bar = $("track-progress-bar");
@@ -1072,10 +1243,15 @@
     if (vid) {
       try { vid.pause(); } catch (err) {}
       vid.removeAttribute("src");
+      vid.removeAttribute("poster");
+      vid.style.opacity = "";
       vid.load();
     }
+    updatePickerPoster("", false);
+    setPickerStatus("");
     setTrackProgress(false, 0);
     setPickerRunning(false);
+    pickerState.mode = "";
   }
 
   function layoutPicker() {
@@ -1089,7 +1265,16 @@
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
     canvas.style.width = rect.width + "px";
     canvas.style.height = rect.height + "px";
-    pickerState.frame = contentRect(stage, video.videoWidth || 16, video.videoHeight || 9);
+    var mw = video.videoWidth || 0;
+    var mh = video.videoHeight || 0;
+    if (!mw || !mh) {
+      var poster = $("track-picker-poster");
+      if (poster && poster.naturalWidth) {
+        mw = poster.naturalWidth;
+        mh = poster.naturalHeight;
+      }
+    }
+    pickerState.frame = contentRect(stage, mw || 16, mh || 9);
     pickerState.dpr = dpr;
   }
 
@@ -1132,12 +1317,26 @@
   function refreshPickerDetections() {
     var video = $("track-picker-video");
     if (!video || !window.PadelTrack || pickerState.running) return Promise.resolve();
-    var frame = PadelTrack.grabFrame(video, 416);
-    return PadelTrack.detectPeople(frame).then(function (boxes) {
+    if (pickerState.mode === "static-only") {
+      pickerState.boxes = [];
+      drawPicker();
+      return Promise.resolve();
+    }
+    var state = PadelTrack.getDetectorState && PadelTrack.getDetectorState();
+    if (state && state.failed) {
+      pickerState.boxes = [];
+      drawPicker();
+      return Promise.resolve();
+    }
+    return PadelTrack.detectPeople(video).then(function (boxes) {
       pickerState.boxes = boxes || [];
       drawPicker();
-    }).catch(function () {
+    }).catch(function (err) {
       pickerState.boxes = [];
+      if (err && err.code === "tainted") {
+        pickerState.mode = "static-only";
+        setPickerStatus("לא ניתן לקרוא את פיקסלי הסרטון. לחצו על עצמכם בתמונה — נשמור סימון בתחילת הסרטון.");
+      }
       drawPicker();
     });
   }
@@ -1148,10 +1347,20 @@
     if (!video || !slider || !isFinite(video.duration) || !video.duration) return;
     var t = (Number(slider.value) / 1000) * video.duration;
     if (pickerState.detectTimer) clearTimeout(pickerState.detectTimer);
-    PadelTrack.seekTo(video, t).then(function () {
+    var after = function () {
+      updatePickerPoster(pickerState.poster || "", videoHasFrame(video));
       drawPicker();
-      pickerState.detectTimer = setTimeout(function () { refreshPickerDetections(); }, 120);
-    });
+      pickerState.detectTimer = setTimeout(function () { refreshPickerDetections(); }, 140);
+    };
+    if (!window.PadelTrack) {
+      try { video.currentTime = t; } catch (err) {}
+      after();
+      return;
+    }
+    PadelTrack.seekTo(video, t).then(function () {
+      if (!videoHasFrame(video)) return kickVideoFrame(video).then(after);
+      after();
+    }, after);
   }
 
   function onPickerTap(ev) {
@@ -1227,6 +1436,9 @@
     var sel = pickerState.selected;
     var video = $("track-picker-video");
     if (!sel || !video) return finishPickerWithStatic(v);
+    if (pickerState.mode === "static-only") {
+      return finishPickerWithStatic(v, "נשמר סימון \"אני\" בתחילת הסרטון");
+    }
     pickerState.cancelled = false;
     setPickerRunning(true);
     setTrackProgress(true, 0, "מזהה את השחקן בסרטון… 0%");
@@ -1260,17 +1472,23 @@
         closeTrackPicker();
         showToast("השחקן סומן בסרטון");
       });
-    }, function () {
-      return finishPickerWithStatic(v, "לא הצלחנו לזהות את השחקן. נשמר סימון בנקודה שנבחרה");
+    }, function (err) {
+      var msg = "לא הצלחנו לזהות את השחקן. נשמר סימון בנקודה שנבחרה";
+      if (err && err.code === "tainted") {
+        msg = "לא ניתן לקרוא את פיקסלי הסרטון. נשמר סימון בתחילת הסרטון";
+      }
+      return finishPickerWithStatic(v, msg);
     });
   }
 
   function openTrackPicker(v) {
-    if (!v || !window.PadelTrack) {
+    if (!v) {
       showToast("לא ניתן לסמן שחקן כרגע");
       return Promise.resolve();
     }
-    var src = v.objectUrl || v.link;
+    var blobSrc = v.objectUrl || "";
+    var cloudSrc = playableCloudinaryUrl(v.link || "");
+    var src = blobSrc || cloudSrc;
     if (!src || !isDirectVideo(src)) {
       showToast("אפשר לסמן שחקן רק בסרטון שהועלה מהמכשיר");
       return Promise.resolve();
@@ -1280,51 +1498,72 @@
     pickerState.boxes = [];
     pickerState.selected = null;
     pickerState.video = v;
+    pickerState.mode = "";
+    pickerState.poster = v.poster || posterFromCloudinary(v.link || cloudSrc) || "";
     var overlay = $("track-picker");
     var video = $("track-picker-video");
     var confirm = $("track-picker-confirm");
     overlay.classList.remove("hidden");
     confirm.disabled = true;
     setPickerRunning(false);
-    setTrackProgress(false, 0, "טוען את מזהה השחקנים…");
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = "auto";
+    setPickerStatus("");
+    setTrackProgress(false, 0);
+    updatePickerPoster(pickerState.poster, videoHasFrame(video));
+    configureVideoEl(video, src, { poster: pickerState.poster });
     video.onloadedmetadata = function () {
       if (video.videoWidth && video.videoHeight) {
         $("track-picker-stage").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
       }
+      if (isFinite(video.duration) && video.duration) {
+        $("track-picker-scrub").value = String(Math.round(((video.currentTime || 0) / video.duration) * 1000));
+      }
+      updatePickerPoster(pickerState.poster, videoHasFrame(video));
+      layoutPicker();
+      drawPicker();
     };
-    video.src = src;
-    return new Promise(function (resolve) {
-      var settled = false;
-      var done = function () {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-      var onReady = function () {
-        video.removeEventListener("loadeddata", onReady);
-        var start = Math.min(0.4, Math.max(0, (video.duration || 1) * 0.08));
-        PadelTrack.seekTo(video, start).then(function () {
-          $("track-picker-scrub").value = video.duration ? String(Math.round((video.currentTime / video.duration) * 1000)) : "0";
-          layoutPicker();
-          drawPicker();
-          setTrackProgress(true, 0, "טוען את מזהה השחקנים…");
-          return PadelTrack.loadDetector().then(function () {
-            setTrackProgress(false, 0);
-            return refreshPickerDetections();
-          }).catch(function () {
-            setTrackProgress(false, 0);
-            showToast("לא ניתן לזהות אוטומטית. לחצו על עצמכם בתמונה");
+    video.onloadeddata = function () {
+      updatePickerPoster(pickerState.poster, videoHasFrame(video));
+      layoutPicker();
+      drawPicker();
+    };
+    return waitForVideoFrame(video, blobSrc && cloudSrc && cloudSrc !== blobSrc ? cloudSrc : "").then(function (hasFrame) {
+      updatePickerPoster(pickerState.poster, hasFrame);
+      if (video.videoWidth && video.videoHeight) {
+        $("track-picker-stage").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
+      }
+      if (isFinite(video.duration) && video.duration) {
+        var start = Math.min(0.12, Math.max(0.04, video.duration * 0.02));
+        if (window.PadelTrack) {
+          return PadelTrack.seekTo(video, start).then(function () {
+            $("track-picker-scrub").value = String(Math.round((video.currentTime / video.duration) * 1000));
           });
-        }).then(done, done);
-      };
-      video.addEventListener("loadeddata", onReady);
-      if (video.readyState >= 2) onReady();
-      setTimeout(function () {
-        if (!settled) onReady();
-      }, 4000);
+        }
+      }
+    }).then(function () {
+      layoutPicker();
+      drawPicker();
+      if (!window.PadelTrack) {
+        pickerState.mode = "template";
+        setTrackProgress(false, 0);
+        setPickerStatus("לחצו על עצמכם בתמונה. נשמור סימון בתחילת הסרטון.");
+        return;
+      }
+      setTrackProgress(true, 0.12, "טוען את מזהה השחקנים…");
+      setPickerStatus("");
+      return PadelTrack.loadDetector(function (text) {
+        if (text) setTrackProgress(true, 0.25, text);
+      }).then(function () {
+        setTrackProgress(false, 0);
+        setPickerStatus("");
+        return refreshPickerDetections();
+      }).catch(function () {
+        setTrackProgress(false, 0);
+        pickerState.mode = "template";
+        setPickerStatus("לא ניתן לזהות שחקנים אוטומטית. לחצו על עצמכם בתמונה — ננסה לעקוב לפי הנקודה והצבע, ואם לא נוכל יישמר סימון \"אני\" בתחילת הסרטון.");
+      });
+    }).then(function () {
+      layoutPicker();
+      drawPicker();
     });
   }
 
@@ -1361,12 +1600,35 @@
     var stage = $("vp-stage");
     if (!video || !canvas || !stage) return null;
     var rect = stage.getBoundingClientRect();
-    var dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = Math.max(1, Math.round(rect.width * dpr));
-    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    if (rect.width < 2 || rect.height < 2) return null;
+    var dpr = Math.min(3, window.devicePixelRatio || 1);
+    var w = Math.max(1, Math.round(rect.width * dpr));
+    var h = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
     canvas.style.width = rect.width + "px";
     canvas.style.height = rect.height + "px";
     return { frame: contentRect(stage, video.videoWidth || 16, video.videoHeight || 9), dpr: dpr };
+  }
+
+  function isStaticTrack(track) {
+    return !!(track && track.m && (!track.k || !track.k.length));
+  }
+
+  function setPlayerHint(track) {
+    var hint = $("vp-hint");
+    if (!hint) return;
+    if (!track) {
+      hint.classList.add("hidden");
+      hint.textContent = "העיגול מסמן את השחקן בכרטיס";
+      return;
+    }
+    hint.classList.remove("hidden");
+    hint.textContent = isStaticTrack(track)
+      ? "הסימון \"אני\" מופיע בתחילת הסרטון"
+      : "העיגול מסמן את השחקן בכרטיס";
   }
 
   function updatePlayerChrome() {
@@ -1486,32 +1748,39 @@
 
   function openVideoPlayer(opts) {
     opts = opts || {};
-    if (!opts.src) return;
+    var src = playableCloudinaryUrl(opts.src || "") || opts.src;
+    if (!src) return;
     var overlay = $("video-player");
     var video = $("vp-video");
-    var hint = $("vp-hint");
     overlay.classList.remove("hidden");
     expandPlayerView(false);
-    playerState.src = opts.src;
-    video.poster = opts.poster || "";
+    playerState.src = src;
+    playerState.track = null;
+    setPlayerHint(null);
+    configureVideoEl(video, src, { poster: opts.poster || posterFromCloudinary(src) || "" });
+    video.muted = false;
+    video.defaultMuted = false;
+    blockNativeFullscreen(video);
     video.onloadedmetadata = function () {
       if (video.videoWidth && video.videoHeight) {
         $("vp-stage").style.aspectRatio = video.videoWidth + " / " + video.videoHeight;
       }
       drawPlayerOverlay();
     };
-    video.src = opts.src;
-    video.playsInline = true;
-    blockNativeFullscreen(video);
-    hint.classList.add("hidden");
+    video.onloadeddata = function () { drawPlayerOverlay(); };
     resolvePlayerTrack(opts).then(function (track) {
       playerState.track = track;
-      if (track) hint.classList.remove("hidden");
+      setPlayerHint(track);
+      drawPlayerOverlay();
+    });
+    waitForVideoFrame(video, "", true).then(function () {
       drawPlayerOverlay();
     });
     var play = video.play();
     if (play && play.catch) play.catch(function () {});
     if (!playerState.raf) playerState.raf = requestAnimationFrame(tickPlayer);
+    setTimeout(function () { drawPlayerOverlay(); }, 250);
+    setTimeout(function () { drawPlayerOverlay(); }, 800);
   }
 
   function isPhotoFile(file) {
@@ -2418,7 +2687,16 @@
       pickerState.cancelled = true;
     });
     $("track-picker-scrub").addEventListener("input", onPickerScrub);
-    $("track-picker-canvas").addEventListener("click", onPickerTap);
+    $("track-picker-scrub").addEventListener("change", onPickerScrub);
+    $("track-picker-scrub").addEventListener("touchend", onPickerScrub);
+    var lastPickerTap = 0;
+    var handlePickerTap = function (ev) {
+      if (Date.now() - lastPickerTap < 350) return;
+      lastPickerTap = Date.now();
+      onPickerTap(ev);
+    };
+    $("track-picker-canvas").addEventListener("pointerup", handlePickerTap);
+    $("track-picker-canvas").addEventListener("click", handlePickerTap);
     $("track-picker").addEventListener("click", function (ev) {
       if (ev.target === $("track-picker") && !pickerState.running) {
         if (pickerState.video && pickerState.selected) finishPickerWithStatic(pickerState.video);
@@ -2439,13 +2717,15 @@
         drawPlayerOverlay();
       }
     });
-    $("vp-seek").addEventListener("input", function () {
+    var onPlayerSeek = function () {
       var video = $("vp-video");
       var slider = $("vp-seek");
       if (!video || !isFinite(video.duration) || !video.duration) return;
       video.currentTime = (Number(slider.value) / 1000) * video.duration;
       drawPlayerOverlay();
-    });
+    };
+    $("vp-seek").addEventListener("input", onPlayerSeek);
+    $("vp-seek").addEventListener("change", onPlayerSeek);
     $("video-player").addEventListener("click", function (ev) {
       if (ev.target === $("video-player") && !playerState.expanded) closeVideoPlayer();
     });
@@ -2459,10 +2739,13 @@
       var video = $("vp-video");
       if (video && video.paused) drawPlayerOverlay();
     });
-    window.addEventListener("resize", function () {
+    var onViewport = function () {
       if (!$("track-picker").classList.contains("hidden")) drawPicker();
       if (!$("video-player").classList.contains("hidden")) drawPlayerOverlay();
-    });
+    };
+    window.addEventListener("resize", onViewport);
+    window.addEventListener("orientationchange", onViewport);
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", onViewport);
     window.addEventListener("hashchange", render);
   }
 

@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="styles.css?v=7" />
-  <link rel="stylesheet" href="cards.css?v=7" />
+  <link rel="stylesheet" href="styles.css?v=8" />
+  <link rel="stylesheet" href="cards.css?v=8" />
 </head>
 <body>
   <div id="app">
@@ -336,13 +336,15 @@
       <h2 id="track-picker-title">מי אתם בסרטון?</h2>
       <p class="track-lead">לחצו על עצמכם בתמונה, כדי שהמארגן יידע על מי להתמקד.</p>
       <div class="track-stage" id="track-picker-stage">
-        <video id="track-picker-video" playsinline muted webkit-playsinline></video>
+        <img id="track-picker-poster" alt="" class="hidden" />
+        <video id="track-picker-video" playsinline muted webkit-playsinline preload="auto"></video>
         <canvas id="track-picker-canvas"></canvas>
       </div>
       <label class="track-scrub" id="track-scrub-wrap">
         <span>בחירת רגע בסרטון</span>
         <input id="track-picker-scrub" type="range" min="0" max="1000" value="0" step="1" dir="ltr" />
       </label>
+      <p class="track-status hidden" id="track-picker-status" aria-live="polite"></p>
       <div class="upload-progress hidden" id="track-progress" aria-live="polite">
         <div class="upload-progress-track"><div class="upload-progress-bar" id="track-progress-bar"></div></div>
         <span id="track-progress-label">מזהה את השחקן בסרטון… 0%</span>
@@ -357,7 +359,7 @@
   <div id="video-player" class="vp-overlay hidden" role="dialog" aria-modal="true">
     <div class="vp-shell" id="vp-shell">
       <div class="vp-stage" id="vp-stage">
-        <video id="vp-video" playsinline webkit-playsinline preload="metadata"></video>
+        <video id="vp-video" playsinline webkit-playsinline preload="auto"></video>
         <canvas id="vp-overlay"></canvas>
       </div>
       <div class="vp-bar">
@@ -372,9 +374,9 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
-  <script src="quiz.js?v=7"></script>
-  <script src="players.js?v=7"></script>
-  <script src="track.js?v=7"></script>
-  <script src="app.js?v=7"></script>
+  <script src="quiz.js?v=8"></script>
+  <script src="players.js?v=8"></script>
+  <script src="track.js?v=8"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
