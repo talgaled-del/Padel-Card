@@ -72,7 +72,7 @@
       state.partnerId = (data.profile && data.profile.partnerId) || data.partnerId || null;
       if (state.profile) state.profile.tenure = normalizeTenure(state.profile.tenure || "");
       state.videos = (data.videos || []).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
       });
     } catch (err) {
       console.warn("לא ניתן לטעון נתונים שמורים", err);
@@ -89,7 +89,7 @@
       if (state.profile && !state.profile.id) state.profile.id = uid();
       state.answers = data.answers || [];
       state.videos = (data.videos || []).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
       });
       persist();
     } catch (err) { /* ignore */ }
@@ -105,7 +105,7 @@
       profile: state.profile,
       answers: state.answers,
       videos: state.videos.filter(function (v) { return !v.uploading; }).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, localOnly: !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, localOnly: !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
       })
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -134,7 +134,7 @@
       score: PadelQuiz.totalScore(state.answers),
       photo: state.photo || null,
       videos: state.videos.map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null };
+        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
       }).filter(function (v) { return v.link; })
     });
   }
@@ -303,7 +303,9 @@
         if (v.trackUrl) item.t = v.trackUrl;
         else if (v.track && compactTrackForLink(v.track)) item.k = compactTrackForLink(v.track);
         else if (v.marker) item.m = v.marker;
-        if (!item.p && !item.t && !item.k && !item.m) return v.link;
+        var va = cleanVideoAi(v.ai, false);
+        if (va) item.a = va;
+        if (!item.p && !item.t && !item.k && !item.m && !item.a) return v.link;
         return item;
       }).filter(Boolean)
     };
@@ -325,8 +327,10 @@
     if (p.tenure) data.t = normalizeTenure(p.tenure);
     if (p.style) data.st = p.style;
     if (p.shots && p.shots.length) data.sk = p.shots;
-    var ai = cleanAi(p.ai || src.ai);
+    var ai = overallAiForCard({ profile: p, videos: videos, ai: src.ai });
     if (ai) data.ai = ai;
+    var lr = cleanLr(p.lr);
+    if (lr) data.lr = lr;
     return data;
   }
 
@@ -353,7 +357,8 @@
         tenure: normalizeTenure(raw.t || ""),
         style: raw.st || "",
         shots: raw.sk || [],
-        ai: cleanAi(raw.ai)
+        ai: cleanAi(raw.ai),
+        lr: cleanLr(raw.lr)
       },
       levelId: raw.lv,
       score: raw.sc || 0,
@@ -365,7 +370,8 @@
         var trackUrl = typeof item === "object" && item ? (item.t || item.trackUrl || "") : "";
         var marker = typeof item === "object" && item ? (item.m || item.marker || null) : null;
         var packed = typeof item === "object" && item ? (item.k || item.track || null) : null;
-        return { id: "link-" + i, name: "סרטון " + (i + 1), link: link, poster: poster, objectUrl: null, trackUrl: trackUrl, marker: marker, track: packed };
+        var va = typeof item === "object" && item ? cleanVideoAi(item.a, false) : null;
+        return { id: "link-" + i, name: "סרטון " + (i + 1), link: link, poster: poster, objectUrl: null, trackUrl: trackUrl, marker: marker, track: packed, ai: va };
       }).filter(function (v) { return v.link; })
     };
   }
@@ -2302,7 +2308,8 @@
       tenure: normalizeTenure(segValue("tenure")),
       style: segValue("style"),
       shots: checkedValues("shots"),
-      ai: cleanAi(state.profile && state.profile.ai)
+      ai: cleanAi(state.profile && state.profile.ai),
+      lr: cleanLr(state.profile && state.profile.lr)
     };
     if (!profile.name) return showToast("חסר שם");
     if (!profile.age || Number(profile.age) < 10 || Number(profile.age) > 99) return showToast("גיל לא תקין");
@@ -2395,15 +2402,16 @@
     var videos = (card.videos || []).filter(function (v) { return v.link || v.objectUrl; });
     var vidHtml = '<p class="ut-section">סרטוני משחק</p>';
     if (videos.length) {
-      vidHtml += '<div class="video-list">' + videos.map(videoTileHtml).join("") + "</div>";
+      vidHtml = videosToggleHtml(videos);
     } else if (!opts.compact) {
       vidHtml += '<p class="empty-videos">עדיין אין סרטונים בכרטיס.</p>';
     } else {
       vidHtml = "";
     }
 
-    var ratingLine = ratingLineHtml(level) + aiRatingHtml(cleanAi(p.ai), opts);
-    if (opts.allowReupload && !opts.compact) vidHtml += aiCtaHtml(videos, cleanAi(p.ai));
+    var aiOverall = overallAiForCard(card);
+    var ratingLine = ratingLineHtml(level) + aiRatingHtml(aiOverall, opts, card);
+    if (opts.allowReupload && !opts.compact) vidHtml += aiCtaHtml(card);
 
     art.innerHTML =
       '<div class="ut-hero' + (photo ? " has-photo" : "") + '">' +
@@ -2412,7 +2420,7 @@
         '<div class="ut-hero-shade"></div>' +
         '<div class="ut-hero-content">' +
           '<div class="ut-id"><h1>' + escapeHtml(p.name) + "</h1><p>" + escapeHtml(identity.join(" · ")) + "</p></div>" +
-          '<div class="' + badgeClass(level.id) + '"><b>' + escapeHtml(level.id) + "</b><span>" + escapeHtml(level.title) + "</span></div>" +
+          heroBadgeHtml(level, aiOverall, p.lr) +
         "</div>" +
       "</div>" +
       (opts.allowReupload && needsPhotoReupload(photo) ? photoQualityPromptHtml() : "") +
@@ -2457,9 +2465,66 @@
       "</div>";
   }
 
-  /* ---------- AI Rating ---------- */
-  // Stored compactly in the card (and the share-link hash):
-  // { l: "C1", c: 0|1|2 (low/medium/high), n: videos, d: yymmdd, e: "≤200 chars", s: [volley, bandeja, vibora, smash, wall, positioning, consistency, pace] (0–10 or null) }
+  /* ---------- Collapsible videos section (v13) ---------- */
+  // Default collapsed; the choice is remembered for the browser session.
+  var VIDEOS_OPEN_KEY = "padelCard.videosOpen";
+  var videosSectionSeq = 0;
+
+  function videosOpenPref() {
+    try { return sessionStorage.getItem(VIDEOS_OPEN_KEY) === "1"; } catch (err) { return false; }
+  }
+
+  function videosToggleHtml(videos) {
+    var open = videosOpenPref();
+    var id = "ut-vids-" + (++videosSectionSeq);
+    var thumbs = videos.slice(0, 3).map(function (v) {
+      var t = v.poster || posterFromCloudinary(v.link || "");
+      return '<span class="ut-vid-peek">' + (t ? '<img alt="" src="' + escapeHtml(t) + '">' : "") + "</span>";
+    }).join("");
+    return '<div class="ut-vids' + (open ? " is-open" : "") + '">' +
+      '<button type="button" class="ut-vid-toggle" aria-expanded="' + (open ? "true" : "false") + '" aria-controls="' + id + '">' +
+        '<span class="ut-vid-title">סרטוני משחק <b>(' + videos.length + ")</b></span>" +
+        '<span class="ut-vid-peeks" aria-hidden="true">' + thumbs + "</span>" +
+        '<span class="ut-vid-hint">' + (open ? "הסתרה" : "הצגה") + "</span>" +
+        '<span class="ut-vid-chev" aria-hidden="true"></span>' +
+      "</button>" +
+      '<div class="ut-vid-body" id="' + id + '"' + (open ? "" : " inert") + '><div class="ut-vid-inner">' +
+        '<div class="video-list">' + videos.map(videoTileHtml).join("") + "</div>" +
+      "</div></div>" +
+    "</div>";
+  }
+
+  function setVideosOpen(wrap, open) {
+    var btn = wrap.querySelector(".ut-vid-toggle");
+    var body = wrap.querySelector(".ut-vid-body");
+    wrap.classList.toggle("is-open", open);
+    if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+    var hint = wrap.querySelector(".ut-vid-hint");
+    if (hint) hint.textContent = open ? "הסתרה" : "הצגה";
+    if (body) {
+      if (open) body.removeAttribute("inert");
+      else body.setAttribute("inert", "");
+    }
+    if (!open) {
+      wrap.querySelectorAll("video").forEach(function (v) { try { v.pause(); } catch (err) {} });
+    }
+  }
+
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target && ev.target.closest && ev.target.closest(".ut-vid-toggle");
+    if (!btn) return;
+    var wrap = btn.closest(".ut-vids");
+    var open = !wrap.classList.contains("is-open");
+    try { sessionStorage.setItem(VIDEOS_OPEN_KEY, open ? "1" : "0"); } catch (err) {}
+    // Keep every videos section on the page (e.g. both pair columns) in the same state.
+    document.querySelectorAll(".ut-vids").forEach(function (w) { setVideosOpen(w, open); });
+  });
+
+  /* ---------- AI Rating (v13: per-video analysis + deterministic combine) ---------- */
+  // Overall result, stored compactly in profile.ai and the share-link hash:
+  //   { l: "C1", c: 0|1|2, n: videos, t: total seconds, d: yymmdd, e: "≤200 chars", s: [8 sub-scores 0–10 | null] }
+  // Per-video result, stored on each video (v.ai; link item field "a"):
+  //   { h: video+track key, l, c: model confidence for this clip, t: seconds, d, s: [8], e (localStorage only), lg: 1 if migrated from v12 }
   var AI_CONF = [
     { key: "low", label: "ביטחון נמוך" },
     { key: "medium", label: "ביטחון בינוני" },
@@ -2475,41 +2540,224 @@
     { key: "consistency", label: "עקביות" },
     { key: "rally_pace", label: "קצב ראלי" }
   ];
-  var aiState = { running: false, warmed: false };
+  var AI_TIMING = { msPerVideoSecond: 2700, overheadMs: 8000, unknownDurationSec: 60 };
+  // Test hook: localStorage "padelCard.aiTiming" = {"msPerVideoSecond":…, "overheadMs":…}
+  try { Object.assign(AI_TIMING, JSON.parse(localStorage.getItem("padelCard.aiTiming") || "{}")); } catch (err) {}
+  var aiState = { warmed: false, justRated: false };
+  var aiRun = null; // { running, stage, items: [...], startedAt, summary }
+
+  function aiLevelIndex(id) {
+    for (var i = 0; i < PadelQuiz.LEVELS.length; i++) if (PadelQuiz.LEVELS[i].id === id) return i;
+    return -1;
+  }
+
+  function cleanScores(arr) {
+    var out = (Array.isArray(arr) ? arr : []).slice(0, AI_SUBS.length).map(function (v) {
+      if (v === null || v === undefined || v === "") return null;
+      var n = Number(v);
+      return isFinite(n) ? Math.max(0, Math.min(10, Math.round(n))) : null;
+    });
+    while (out.length < AI_SUBS.length) out.push(null);
+    return out;
+  }
+
+  function cleanConf(c) {
+    c = Number(c);
+    return c === 0 || c === 1 || c === 2 ? c : 0;
+  }
 
   function cleanAi(ai) {
     if (!ai || typeof ai !== "object") return null;
     if (!PadelQuiz.levelById(ai.l)) return null;
-    var c = Number(ai.c);
     var out = {
       l: ai.l,
-      c: c === 0 || c === 1 || c === 2 ? c : 0,
+      c: cleanConf(ai.c),
       n: Math.max(1, Math.min(9, Math.round(Number(ai.n) || 1))),
       d: Math.round(Number(ai.d) || 0),
       e: String(ai.e || "").slice(0, 200),
-      s: (Array.isArray(ai.s) ? ai.s : []).slice(0, AI_SUBS.length).map(function (v) {
-        if (v === null || v === undefined || v === "") return null;
-        var n = Number(v);
-        return isFinite(n) ? Math.max(0, Math.min(10, Math.round(n))) : null;
-      })
+      s: cleanScores(ai.s)
     };
-    while (out.s.length < AI_SUBS.length) out.s.push(null);
+    var t = Math.round(Number(ai.t) || 0);
+    if (t > 0) out.t = t;
     return out;
   }
 
-  function aiFromServer(res) {
-    var conf = { low: 0, medium: 1, high: 2 }[res.confidence];
+  function cleanVideoAi(a, keepText) {
+    if (!a || typeof a !== "object" || !PadelQuiz.levelById(a.l)) return null;
+    var out = {
+      h: String(a.h || "").slice(0, 16),
+      l: a.l,
+      c: cleanConf(a.c),
+      t: Math.max(0, Math.round(Number(a.t) || 0)),
+      d: Math.round(Number(a.d) || 0),
+      s: cleanScores(a.s)
+    };
+    if (keepText && a.e) out.e = String(a.e).slice(0, 200);
+    if (a.lg) out.lg = 1;
+    return out;
+  }
+
+  function todayYmd() {
     var now = new Date();
-    var d = (now.getFullYear() % 100) * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
-    var subs = res.subscores || {};
+    return (now.getFullYear() % 100) * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+  }
+
+  function hashStr(str) {
+    var h1 = 5381, h2 = 52711;
+    for (var i = 0; i < str.length; i++) {
+      var ch = str.charCodeAt(i);
+      h1 = (h1 * 33) ^ ch;
+      h2 = (h2 * 33) ^ ch;
+    }
+    return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36).slice(0, 3);
+  }
+
+  // Cloudinary public id (transformations and version stripped) or the plain URL.
+  function videoIdentity(url) {
+    url = String(url || "");
+    var i = url.indexOf("/upload/");
+    if (!isCloudinaryVideo(url) || i < 0) return url.split("?")[0];
+    var parts = url.slice(i + 8).split("?")[0].split("/").filter(function (seg) {
+      return seg && !/^v\d+$/.test(seg) && !/,/.test(seg) && !/^[a-z]{1,3}_[^/]*$/.test(seg);
+    });
+    return parts.join("/").replace(/\.[a-z0-9]{2,5}$/i, "");
+  }
+
+  function trackSignature(v) {
+    if (v.trackUrl) return "u:" + v.trackUrl;
+    if (v.track) { try { return "k:" + JSON.stringify(v.track); } catch (err) {} }
+    if (v.marker) return "m:" + (v.marker || []).join(",");
+    return "";
+  }
+
+  function aiVideoKey(v) {
+    return hashStr(videoIdentity(v.link) + "|" + trackSignature(v));
+  }
+
+  function videoSeconds(v) {
+    var d = Number(v.duration) || 0;
+    if (!d && v.track && v.track.d) d = v.track.d / 100;
+    return d;
+  }
+
+  function aiEligibleVideos(videos) {
+    return (videos || []).filter(function (v) {
+      return v.link && isCloudinaryVideo(v.link) || (v.link && isDirectVideo(v.link) && /^https?:/i.test(v.link));
+    });
+  }
+
+  function videoIsMarked(v) {
+    return !!(v.trackUrl || v.track || v.marker);
+  }
+
+  function isLocalVideoList(videos) {
+    return videos === state.videos;
+  }
+
+  // A per-video result counts only while it still matches the video + its marking.
+  // Shared links carry results without the track itself, so they are trusted as-is.
+  function validVideoAi(v, validate) {
+    if (!v || !v.ai) return null;
+    if (validate && v.ai.h && v.ai.h !== aiVideoKey(v)) return null;
+    return v.ai;
+  }
+
+  // Deterministic, explainable combine:
+  //   weight = clip seconds (min 10) × confidence weight (low 1, medium 2, high 3)
+  //   level = weighted mean of level positions on the quiz scale, rounded
+  //   sub-scores = weighted mean over clips where the aspect was seen
+  //   confidence = weighted mean, capped by total footage (<2 min → low, <5 min → at most medium),
+  //                one step lower if clips disagree by 3+ levels
+  //   explanation = the one from the clip with the largest weight
+  function combineAi(results) {
+    if (!results.length) return null;
+    var CW = [1, 2, 3];
+    var totalW = 0, lvl = 0, conf = 0, total = 0, best = null, bestW = -1, minI = 99, maxI = -1;
+    var sums = AI_SUBS.map(function () { return 0; }), ws = AI_SUBS.map(function () { return 0; });
+    results.forEach(function (r) {
+      var idx = aiLevelIndex(r.l);
+      if (idx < 0) return;
+      var w = Math.max(10, r.t || 0) * CW[cleanConf(r.c)];
+      totalW += w;
+      lvl += w * idx;
+      conf += w * cleanConf(r.c);
+      total += r.t || 0;
+      minI = Math.min(minI, idx);
+      maxI = Math.max(maxI, idx);
+      if (w > bestW) { bestW = w; best = r; }
+      (r.s || []).forEach(function (v, i) {
+        if (v === null || v === undefined) return;
+        sums[i] += w * v;
+        ws[i] += w;
+      });
+    });
+    if (!totalW) return null;
+    var c = Math.round(conf / totalW);
+    if (total < 120) c = 0;
+    else if (total < 300) c = Math.min(c, 1);
+    if (maxI - minI >= 3) c = Math.max(0, c - 1);
+    var latest = 0;
+    results.forEach(function (r) { latest = Math.max(latest, r.d || 0); });
     return cleanAi({
+      l: PadelQuiz.LEVELS[Math.round(lvl / totalW)].id,
+      c: c,
+      n: results.length,
+      t: Math.round(total),
+      d: latest || todayYmd(),
+      e: (best && best.e) || "",
+      s: sums.map(function (s, i) { return ws[i] ? Math.round(s / ws[i]) : null; })
+    });
+  }
+
+  // Overall rating shown on a card. Falls back to a stored (e.g. v12) overall
+  // only when no video carries a per-video result at all.
+  function overallAiForCard(card) {
+    if (!card) return null;
+    var p = card.profile || {};
+    var videos = card.videos || [];
+    var validate = isLocalVideoList(videos);
+    var anyPerVideo = videos.some(function (v) { return !!v.ai; });
+    if (!anyPerVideo) return cleanAi(p.ai || card.ai);
+    var results = [];
+    aiEligibleVideos(videos).forEach(function (v) {
+      var a = validVideoAi(v, validate);
+      if (a) results.push(Object.assign({}, a, { e: a.e || "" }));
+    });
+    var combined = combineAi(results);
+    if (combined && !combined.e) {
+      var stored = cleanAi(p.ai);
+      if (stored && stored.e && results.length === 1) combined.e = stored.e;
+    }
+    return combined;
+  }
+
+  // v12 → v13: an overall result from N videos is attached to the first N marked videos
+  // (videos are appended in upload order, so those are the ones v12 analysed).
+  function migrateLegacyAi() {
+    if (!state.profile || !state.profile.ai) return;
+    var videos = aiEligibleVideos(state.videos);
+    if (!videos.length || videos.some(function (v) { return !!v.ai; })) return;
+    var ai = cleanAi(state.profile.ai);
+    if (!ai) return;
+    var marked = videos.filter(videoIsMarked);
+    if (ai.n > marked.length) return;
+    marked.slice(0, ai.n).forEach(function (v) {
+      v.ai = cleanVideoAi({ h: aiVideoKey(v), l: ai.l, c: ai.c, t: Math.round(videoSeconds(v)), d: ai.d, s: ai.s, e: ai.e, lg: 1 }, true);
+    });
+  }
+
+  function aiFromServer(res, v) {
+    var conf = { low: 0, medium: 1, high: 2 }[res.modelConfidence || res.confidence];
+    var subs = res.subscores || {};
+    return cleanVideoAi({
+      h: aiVideoKey(v),
       l: res.level,
       c: conf == null ? 0 : conf,
-      n: res.videoCount || 1,
-      d: d,
+      t: Math.round(videoSeconds(v) || res.totalSeconds || 0),
+      d: todayYmd(),
       e: res.explanation || "",
       s: AI_SUBS.map(function (k) { return subs[k.key]; })
-    });
+    }, true);
   }
 
   function aiDateText(d) {
@@ -2531,7 +2779,43 @@
       "</div>";
   }
 
-  function aiRatingHtml(ai, opts) {
+  function videoThumb(v) {
+    return v.poster || posterFromCloudinary(v.link || "") || "";
+  }
+
+  function videoLabel(v, i) {
+    var sub = [];
+    var sec = videoSeconds(v);
+    if (sec) sub.push(formatDuration(sec));
+    if (v.name && !/^סרטון/.test(v.name)) sub.push(v.name);
+    return { title: "סרטון " + (i + 1), sub: sub.join(" · ") };
+  }
+
+  function thumbHtml(v, cls) {
+    var t = videoThumb(v);
+    return '<span class="' + cls + '">' + (t ? '<img alt="" src="' + escapeHtml(t) + '">' : "") + "</span>";
+  }
+
+  function aiBasisHtml(card) {
+    var videos = aiEligibleVideos(card.videos || []);
+    var validate = isLocalVideoList(card.videos || []);
+    var rows = [];
+    videos.forEach(function (v, i) {
+      var a = validVideoAi(v, validate);
+      if (!a) return;
+      var lab = videoLabel(v, i);
+      var conf = AI_CONF[a.c] || AI_CONF[0];
+      rows.push('<li class="ai-basis-row">' + thumbHtml(v, "ai-thumb") +
+        '<span class="ai-basis-txt"><b>' + escapeHtml(lab.title) + "</b>" + (lab.sub ? "<small>" + escapeHtml(lab.sub) + "</small>" : "") + "</span>" +
+        '<span class="ai-basis-lv" dir="ltr">' + escapeHtml(a.l) + "</span>" +
+        '<span class="ai-dot conf-' + conf.key + '" title="' + conf.label + '"></span>' +
+        "</li>");
+    });
+    if (!rows.length) return "";
+    return '<p class="ut-ai-group">מבוסס על</p><ul class="ai-basis">' + rows.join("") + "</ul>";
+  }
+
+  function aiRatingHtml(ai, opts, card) {
     if (!ai) return "";
     var level = PadelQuiz.levelById(ai.l);
     var conf = AI_CONF[ai.c] || AI_CONF[0];
@@ -2539,12 +2823,15 @@
     AI_SUBS.forEach(function (sub, i) {
       (sub.group === "tech" ? tech : rest).push(aiBarHtml(sub, ai.s[i]));
     });
+    var basis = card ? aiBasisHtml(card) : "";
     var details =
       '<div class="ut-ai-details" hidden>' +
         (ai.e ? '<p class="ut-ai-expl">' + escapeHtml(ai.e) + "</p>" : "") +
         '<p class="ut-ai-group">טכניקה</p>' + tech.join("") +
         '<p class="ut-ai-group">משחק</p>' + rest.join("") +
-        '<p class="ut-ai-foot">הערכה אוטומטית מהסרטונים' + (ai.d ? " · " + aiDateText(ai.d) : "") + ". לא דירוג רשמי.</p>" +
+        basis +
+        '<p class="ut-ai-foot">' + (ai.n > 1 ? "הרמה הכוללת היא ממוצע משוקלל לפי אורך כל סרטון ורמת הביטחון בו. " : "") +
+          "הערכה אוטומטית מהסרטונים" + (ai.t ? " (" + formatDuration(ai.t) + " דק׳ משחק)" : "") + (ai.d ? " · " + aiDateText(ai.d) : "") + ". לא דירוג רשמי.</p>" +
       "</div>";
     return '<div class="ut-ai' + (opts && opts.compact ? " compact" : "") + '">' +
       '<button type="button" class="ut-ai-line" aria-expanded="false">' +
@@ -2560,26 +2847,108 @@
     "</div>";
   }
 
-  function aiEligibleVideos(videos) {
-    return (videos || []).filter(function (v) {
-      return v.link && isCloudinaryVideo(v.link) || (v.link && isDirectVideo(v.link) && /^https?:/i.test(v.link));
+  /* Which videos still need analysis. */
+  function aiPlan(card) {
+    var videos = aiEligibleVideos(card.videos || []);
+    var validate = isLocalVideoList(card.videos || []);
+    var plan = { all: videos, done: [], pending: [], unmarked: [] };
+    videos.forEach(function (v) {
+      if (validVideoAi(v, validate)) plan.done.push(v);
+      else if (videoIsMarked(v)) plan.pending.push(v);
+      else plan.unmarked.push(v);
     });
+    return plan;
   }
 
-  function aiCtaHtml(videos, ai) {
-    var list = aiEligibleVideos(videos);
-    if (!list.length) return "";
-    var running = aiState.running;
-    return '<div class="ut-ai-cta">' +
-      '<button type="button" class="btn btn-ai' + (running ? " is-loading" : "") + '" id="ai-rate-btn"' + (running ? ' disabled aria-busy="true"' : "") + ">" +
-        (running
-          ? '<span class="ai-spinner" aria-hidden="true"></span><span>מנתח את המשחק… זה יכול לקחת דקה</span>'
-          : '<span class="ut-ai-spark" aria-hidden="true">✦</span><span>' + (ai ? "עדכון AI Rating" : "קבל AI Rating") + "</span>") +
-      "</button>" +
-      '<p class="ut-ai-hint">' + (running
-        ? "אפשר להישאר בעמוד. התוצאה תישמר בכרטיס."
-        : "ה-AI צופה בסרטונים שבהם סימנת את עצמך ומעריך את הרמה. כדאי לפחות 2 דקות משחק.") + "</p>" +
+  var AI_STATUS = {
+    done: { text: "נותח", cls: "st-done" },
+    cached: { text: "נותח", cls: "st-done" },
+    running: { text: "מנתח עכשיו…", cls: "st-running" },
+    waiting: { text: "ממתין", cls: "st-waiting" },
+    failed: { text: "נכשל", cls: "st-failed" },
+    idle: { text: "טרם נותח", cls: "st-waiting" },
+    unmarked: { text: "לא מסומן", cls: "st-unmarked" }
+  };
+
+  function aiItemRowHtml(item) {
+    var st = AI_STATUS[item.status] || AI_STATUS.waiting;
+    var lab = videoLabel(item.v, item.idx);
+    var showBar = item.status === "running";
+    var note = item.status === "cached" ? "מניתוח קודם" : item.status === "failed" ? (item.error || "") : item.status === "unmarked" ? "סמנו את עצמכם כדי לנתח" : "";
+    return '<li class="ai-run-row ' + st.cls + '" data-run-idx="' + item.idx + '">' +
+      thumbHtml(item.v, "ai-thumb") +
+      '<span class="ai-run-txt"><b>' + escapeHtml(lab.title) + "</b>" +
+        '<small class="ai-run-sub">' + escapeHtml([lab.sub, note].filter(Boolean).join(" · ")) + "</small>" +
+        (showBar ? '<span class="ai-run-mini"><span class="ai-run-mini-fill" style="width:' + Math.round((item.frac || 0) * 100) + '%"></span></span>' : "") +
+      "</span>" +
+      '<span class="ai-st">' + (item.status === "running" ? '<span class="ai-spinner sm" aria-hidden="true"></span>' : item.status === "done" || item.status === "cached" ? '<span class="ai-check" aria-hidden="true"></span>' : "") + st.text + "</span>" +
+    "</li>";
+  }
+
+  function aiRunPct() {
+    if (!aiRun) return 0;
+    var queue = aiRun.items.filter(function (it) { return it.queued; });
+    var tot = 0, got = 0;
+    queue.forEach(function (it) {
+      tot += it.expectedMs;
+      got += it.expectedMs * (it.status === "done" || it.status === "failed" ? 1 : (it.frac || 0));
+    });
+    return tot ? Math.min(aiRun.running ? 99 : 100, Math.round(100 * got / tot)) : 0;
+  }
+
+  function aiRunStageText() {
+    if (!aiRun) return "";
+    if (!aiRun.running) return aiRun.summary || "";
+    if (aiRun.stage === "wake") return "מעיר את השרת…";
+    var queue = aiRun.items.filter(function (it) { return it.queued; });
+    var cur = aiRun.items.filter(function (it) { return it.status === "running"; })[0];
+    if (!cur) return "מנתח…";
+    var pos = queue.indexOf(cur) + 1;
+    return (cur.preparing ? "מכין את " : "מנתח את ") + "סרטון " + (cur.idx + 1) + " · " + pos + " מתוך " + queue.length;
+  }
+
+  function aiRunPanelHtml() {
+    var pct = aiRunPct();
+    return '<div class="ai-run' + (aiRun.running ? " is-running" : " is-finished") + '" id="ai-run" aria-live="polite">' +
+      '<div class="ai-run-head"><span class="ai-run-title"><span class="ut-ai-spark" aria-hidden="true">✦</span>' + (aiRun.running ? "ניתוח AI" : "הניתוח הסתיים") + "</span>" +
+        '<span class="ai-run-pct" dir="ltr" id="ai-run-pct">' + pct + "%</span></div>" +
+      '<div class="ai-run-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><span class="ai-run-fill" id="ai-run-fill" style="width:' + pct + '%"></span></div>' +
+      '<p class="ai-run-stage" id="ai-run-stage">' + escapeHtml(aiRunStageText()) + "</p>" +
+      '<ul class="ai-run-list" id="ai-run-list">' + aiRun.items.map(aiItemRowHtml).join("") + "</ul>" +
+      (aiRun.running ? '<p class="ut-ai-hint">אפשר להישאר בעמוד. כל סרטון שמסתיים נשמר מיד בכרטיס.</p>' : "") +
     "</div>";
+  }
+
+  function aiIdleListHtml(plan) {
+    if (plan.all.length < 2 && !plan.unmarked.length) return "";
+    var items = plan.all.map(function (v, i) {
+      var status = plan.done.indexOf(v) >= 0 ? "cached" : plan.unmarked.indexOf(v) >= 0 ? "unmarked" : "idle";
+      return { v: v, idx: i, status: status };
+    });
+    return '<ul class="ai-run-list idle">' + items.map(aiItemRowHtml).join("") + "</ul>";
+  }
+
+  function aiCtaHtml(card) {
+    var plan = aiPlan(card);
+    if (!plan.all.length) return "";
+    if (aiRun) return '<div class="ut-ai-cta">' + aiRunPanelHtml() + (aiRun.running ? "" : aiButtonsHtml(plan)) + "</div>";
+    return '<div class="ut-ai-cta">' + aiButtonsHtml(plan) + aiIdleListHtml(plan) +
+      '<p class="ut-ai-hint">' + (plan.pending.length
+        ? "ה-AI צופה בסרטונים שבהם סימנת את עצמך ומעריך את הרמה. רק סרטונים שעוד לא נותחו יישלחו. כדאי לפחות 2 דקות משחק בסך הכול."
+        : plan.done.length ? "כל סרטון מנותח פעם אחת. סרטון חדש או סימון מחדש ינותחו בלחיצה הבאה." : "סמנו את עצמכם בסרטון כדי לקבל AI Rating.") + "</p>" +
+    "</div>";
+  }
+
+  function aiButtonsHtml(plan) {
+    if (plan.pending.length) {
+      var label = plan.done.length ? "נתח סרטונים חדשים (" + plan.pending.length + ")" : "קבל AI Rating" + (plan.pending.length > 1 ? " (" + plan.pending.length + " סרטונים)" : "");
+      return '<button type="button" class="btn btn-ai" id="ai-rate-btn" data-mode="new"><span class="ut-ai-spark" aria-hidden="true">✦</span><span>' + label + "</span></button>";
+    }
+    if (plan.done.length) {
+      return '<button type="button" class="btn btn-ai is-complete" id="ai-rate-btn" data-mode="none" aria-disabled="true"><span class="ai-check" aria-hidden="true"></span><span>כל הסרטונים נותחו</span></button>' +
+        '<button type="button" class="ai-reanalyze" id="ai-reanalyze-btn">ניתוח מחדש של כל הסרטונים</button>';
+    }
+    return '<button type="button" class="btn btn-ai" id="ai-rate-btn" data-mode="unmarked"><span class="ut-ai-spark" aria-hidden="true">✦</span><span>קבל AI Rating</span></button>';
   }
 
   /* Clothing colours from the first frame, inside the marked start box.
@@ -2704,14 +3073,137 @@
     });
   }
 
+  /* ---------- Top badge: quiz level, or a quiz/AI range ---------- */
+  // 1 step apart → range shown automatically. 2+ steps → owner is asked once per (AI level, quiz level);
+  // the decision is stored as profile.lr = { a: AI level, q: quiz level, ok: 1|0 } (also in the share link).
+  function cleanLr(lr) {
+    if (!lr || typeof lr !== "object" || !PadelQuiz.levelById(lr.a) || !PadelQuiz.levelById(lr.q)) return null;
+    return { a: lr.a, q: lr.q, ok: lr.ok ? 1 : 0 };
+  }
+
+  // Range proposed when AI is 2+ steps away: the AI level and its neighbour towards the quiz level.
+  function proposedRange(qIdx, aIdx) {
+    var other = aIdx + (qIdx > aIdx ? 1 : -1);
+    return { lo: Math.min(aIdx, other), hi: Math.max(aIdx, other) };
+  }
+
+  function levelBadgeInfo(quizId, ai, lr) {
+    var q = aiLevelIndex(quizId);
+    var a = ai ? aiLevelIndex(ai.l) : -1;
+    var L = PadelQuiz.LEVELS;
+    var res = { kind: "quiz", lo: q, hi: q, gap: a < 0 ? 0 : Math.abs(a - q), aIdx: a, qIdx: q };
+    if (q < 0 || a < 0 || a === q) return res;
+    if (Math.abs(a - q) === 1) {
+      res.kind = "range";
+      res.lo = Math.min(a, q);
+      res.hi = Math.max(a, q);
+      return res;
+    }
+    lr = cleanLr(lr);
+    res.kind = "far";
+    res.decided = !!(lr && lr.a === L[a].id && lr.q === L[q].id);
+    if (res.decided && lr.ok) {
+      var r = proposedRange(q, a);
+      res.kind = "accepted";
+      res.lo = r.lo;
+      res.hi = r.hi;
+    }
+    return res;
+  }
+
+  function rangeText(lo, hi) {
+    var L = PadelQuiz.LEVELS;
+    return L[lo].id + "-" + L[hi].id;
+  }
+
+  function heroBadgeHtml(level, ai, lr) {
+    var info = levelBadgeInfo(level.id, ai, lr);
+    if (info.kind === "range" || info.kind === "accepted") {
+      var L = PadelQuiz.LEVELS;
+      return '<div class="' + badgeClass(L[info.lo].id) + ' is-range" title="טווח לפי השאלון וה-AI"><b dir="ltr">' +
+        escapeHtml(L[info.lo].id) + '<i>-</i>' + escapeHtml(L[info.hi].id) + "</b><span>שאלון + AI</span></div>";
+    }
+    return '<div class="' + badgeClass(level.id) + '"><b>' + escapeHtml(level.id) + "</b><span>" + escapeHtml(level.title) + "</span></div>";
+  }
+
+  // Wrap level ids (e.g. "C2-C1", "B2") so they don't flip punctuation in RTL text.
+  function bidiLevels(text) {
+    return escapeHtml(text).replace(/[A-D][12](?:-[A-D][12])?/g, function (m) { return '<bdi dir="ltr">' + m + "</bdi>"; });
+  }
+
+  function closeLevelDialog() {
+    var el = $("level-dialog");
+    if (el) el.remove();
+  }
+
+  function setLevelDecision(card, info, ok) {
+    var L = PadelQuiz.LEVELS;
+    var lr = { a: L[info.aIdx].id, q: L[info.qIdx].id, ok: ok ? 1 : 0 };
+    if (state.profile) state.profile.lr = lr;
+    if (state.publicCard && viewerOwnsCard(state.publicCard)) {
+      state.publicCard.profile.lr = lr;
+      try { history.replaceState(null, "", "#/p/" + toBase64Url(JSON.stringify(compactPlayer(state.publicCard, true)))); } catch (err) {}
+    }
+    persist();
+  }
+
+  // Called after a fresh AI result. Asks only when AI is 2+ steps from the quiz and this exact pair wasn't decided yet.
+  function maybeAskLevelRange() {
+    var card = viewedCardForAi();
+    if (!card || !viewerOwnsViewedCard()) return;
+    var ai = overallAiForCard(card);
+    var p = card.profile || {};
+    var info = levelBadgeInfo(card.levelId, ai, p.lr);
+    if (info.kind !== "far" || info.decided) return;
+    var L = PadelQuiz.LEVELS;
+    var r = proposedRange(info.qIdx, info.aIdx);
+    var lower = info.aIdx < info.qIdx;
+    var range = lower ? L[r.lo].id + "-" + L[r.hi].id : L[r.lo].id + "-" + L[r.hi].id;
+    var msg = "ה-AI דירג אותך " + L[info.aIdx].id + ", רחוק מהרמה בשאלון (" + L[info.qIdx].id + "). " +
+      (lower ? "להוריד" : "להעלות") + " את הרמה שלך לטווח " + range + "?";
+    closeLevelDialog();
+    var wrap = document.createElement("div");
+    wrap.id = "level-dialog";
+    wrap.className = "lvl-dialog";
+    wrap.setAttribute("role", "dialog");
+    wrap.setAttribute("aria-modal", "true");
+    wrap.innerHTML =
+      '<div class="lvl-dialog-card">' +
+        '<div class="lvl-dialog-levels" dir="ltr">' +
+          '<span class="lvl-chip quiz"><small>שאלון</small><b>' + escapeHtml(L[info.qIdx].id) + "</b></span>" +
+          '<span class="lvl-arrow" aria-hidden="true">' + (lower ? "↘" : "↗") + "</span>" +
+          '<span class="lvl-chip ai"><small>AI</small><b>' + escapeHtml(L[info.aIdx].id) + "</b></span>" +
+        "</div>" +
+        '<p class="lvl-dialog-text">' + bidiLevels(msg) + "</p>" +
+        '<p class="lvl-dialog-note">הרמה בשאלון נשארת שמורה, ושתי השורות ממשיכות להופיע בכרטיס.</p>' +
+        '<div class="btn-row two">' +
+          '<button type="button" class="btn btn-ghost" id="level-dialog-no">לא, להשאיר ' + escapeHtml(L[info.qIdx].id) + "</button>" +
+          '<button type="button" class="btn btn-primary" id="level-dialog-yes">כן, ' + escapeHtml(range) + "</button>" +
+        "</div>" +
+      "</div>";
+    document.body.appendChild(wrap);
+    $("level-dialog-yes").addEventListener("click", function () {
+      setLevelDecision(card, info, true);
+      closeLevelDialog();
+      rerenderAfterAi();
+      showToast("הרמה בכרטיס עודכנה לטווח " + range, 3500);
+    });
+    $("level-dialog-no").addEventListener("click", function () {
+      setLevelDecision(card, info, false);
+      closeLevelDialog();
+      rerenderAfterAi();
+      showToast("הרמה בכרטיס נשארה " + L[info.qIdx].id, 3000);
+    });
+  }
+
   function viewedCardForAi() {
     return state.publicCard && viewerOwnsCard(state.publicCard) ? state.publicCard : (state.profile ? currentCardData() : null);
   }
 
   function aiErrorMessage(err) {
     if (err && err.userMessage) return err.userMessage;
-    if (err && err.name === "AbortError") return "הניתוח לקח יותר מדי זמן. נסו שוב";
-    return "אין חיבור לשרת ה-AI. נסו שוב בעוד רגע";
+    if (err && err.name === "AbortError") return "הניתוח לקח יותר מדי זמן";
+    return "אין חיבור לשרת ה-AI";
   }
 
   function warmAiServer() {
@@ -2721,57 +3213,180 @@
     try { fetch(AI_API.base + "/healthz", { mode: "cors" }).catch(function () {}); } catch (err) {}
   }
 
-  function requestAiRating() {
-    if (aiState.running) return;
-    var card = viewedCardForAi();
-    if (!card || !viewerOwnsViewedCard()) return;
-    var list = aiEligibleVideos(card.videos);
-    if (!list.length) { showToast("העלו סרטון משחק כדי לקבל AI Rating", 3500); return; }
-    var marked = list.filter(function (v) { return v.trackUrl || v.track || v.marker; });
-    if (!marked.length) { showToast("סמנו את עצמכם בסרטון לפני הניתוח", 3500); return; }
-    aiState.running = true;
-    rerenderAfterAi();
+  function wakeAiServer() {
+    var attempt = function (ms) {
+      var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, ms);
+      return fetch(AI_API.base + "/healthz", { mode: "cors", signal: ctrl ? ctrl.signal : undefined })
+        .then(function (r) { clearTimeout(timer); if (!r.ok) throw new Error("health-" + r.status); return r.json(); })
+        .catch(function (e) { clearTimeout(timer); throw e; });
+    };
+    return attempt(70000).catch(function () { return attempt(40000); });
+  }
+
+  function expectedMsFor(v) {
+    var sec = videoSeconds(v) || AI_TIMING.unknownDurationSec;
+    return AI_TIMING.overheadMs + sec * AI_TIMING.msPerVideoSecond;
+  }
+
+  // Time-based estimate: linear to 90% at the expected time, then creeps towards 95%.
+  function estimateFrac(item) {
+    if (!item.startedAt) return 0;
+    var r = (Date.now() - item.startedAt) / item.expectedMs;
+    if (r < 1) return 0.9 * r;
+    return Math.min(0.95, 0.9 + 0.05 * (1 - Math.exp(-(r - 1) * 2)));
+  }
+
+  function tickAiRun() {
+    if (!aiRun || !aiRun.running) return;
+    aiRun.items.forEach(function (it) { if (it.status === "running") it.frac = estimateFrac(it); });
+    var pct = aiRunPct();
+    var fill = $("ai-run-fill"), pctEl = $("ai-run-pct"), stage = $("ai-run-stage");
+    if (fill) {
+      fill.style.width = pct + "%";
+      fill.parentNode.setAttribute("aria-valuenow", String(pct));
+    }
+    if (pctEl) pctEl.textContent = pct + "%";
+    if (stage) stage.textContent = aiRunStageText();
+    aiRun.items.forEach(function (it) {
+      if (it.status !== "running") return;
+      var row = document.querySelector('.ai-run-row[data-run-idx="' + it.idx + '"] .ai-run-mini-fill');
+      if (row) row.style.width = Math.round(it.frac * 100) + "%";
+    });
+  }
+
+  function refreshAiRunList() {
+    var list = $("ai-run-list");
+    if (list && aiRun) list.innerHTML = aiRun.items.map(aiItemRowHtml).join("");
+    tickAiRun();
+  }
+
+  function saveVideoAi(card, v, result) {
+    v.ai = result;
+    // Owner viewing their own shared link: mirror into the local card too.
+    if (!isLocalVideoList(card.videos)) {
+      state.videos.forEach(function (lv) {
+        if (lv.link && videoIdentity(lv.link) === videoIdentity(v.link)) lv.ai = Object.assign({}, result, { h: aiVideoKey(lv) });
+      });
+    }
+    var overall = overallAiForCard(card);
+    if (state.profile) state.profile.ai = overall || state.profile.ai || null;
+    if (state.publicCard && viewerOwnsCard(state.publicCard)) {
+      state.publicCard.profile.ai = overall;
+      try { history.replaceState(null, "", "#/p/" + toBase64Url(JSON.stringify(compactPlayer(state.publicCard, true)))); } catch (err) {}
+    }
+    persist();
+  }
+
+  function analyzeOne(card, item) {
+    var p = card.profile || {};
+    item.status = "running";
+    item.preparing = true;
+    item.startedAt = Date.now();
+    item.frac = 0;
+    refreshAiRunList();
     var ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, AI_API.timeoutMs);
-    var p = card.profile || {};
-    Promise.all(marked.slice(0, 3).map(prepareAiVideo)).then(function (videos) {
+    return prepareAiVideo(item.v).then(function (payload) {
+      item.preparing = false;
       return fetch(AI_API.base + "/api/ai-rating", {
         method: "POST",
         mode: "cors",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cardId: cardOwnerId(card), videos: videos, profile: { hand: p.hand, gender: p.gender } }),
+        body: JSON.stringify({ cardId: cardOwnerId(card), perVideo: true, videos: [payload], profile: { hand: p.hand, gender: p.gender } }),
         signal: ctrl ? ctrl.signal : undefined
       });
     }).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (json) {
         if (!res.ok || !json || !json.level) {
           var e = new Error(json && json.error || "http-" + res.status);
-          e.userMessage = (json && json.message) || "ניתוח ה-AI נכשל. נסו שוב";
+          e.userMessage = (json && json.message) || "ניתוח ה-AI נכשל";
+          e.code = json && json.error;
           throw e;
         }
         return json;
       });
     }).then(function (json) {
-      var ai = aiFromServer(json);
-      if (!ai) throw Object.assign(new Error("bad-result"), { userMessage: "ניתוח ה-AI החזיר תשובה לא תקינה. נסו שוב" });
-      if (state.profile) {
-        state.profile.ai = ai;
-        persist();
-      }
-      if (state.publicCard && viewerOwnsCard(state.publicCard)) {
-        state.publicCard.profile.ai = ai;
-        try { history.replaceState(null, "", "#/p/" + toBase64Url(JSON.stringify(compactPlayer(state.publicCard, true)))); } catch (err) {}
-      }
-      aiState.running = false;
-      aiState.justRated = true;
-      rerenderAfterAi();
-      showToast("ה-AI Rating נשמר בכרטיס. שתפו שוב את הקישור כדי שכולם יראו", 4000);
+      var result = aiFromServer(json, item.v);
+      if (!result) throw Object.assign(new Error("bad-result"), { userMessage: "תשובה לא תקינה מה-AI" });
+      saveVideoAi(card, item.v, result);
+      item.status = "done";
+      item.frac = 1;
     }).catch(function (err) {
       console.warn("ai-rating", err);
-      aiState.running = false;
-      rerenderAfterAi();
+      item.status = "failed";
+      item.error = aiErrorMessage(err);
+      item.code = err && err.code;
+    }).then(function () {
+      clearTimeout(timer);
+      item.preparing = false;
+      refreshAiRunList();
+    });
+  }
+
+  function requestAiRating(mode) {
+    if (aiRun && aiRun.running) return;
+    var card = viewedCardForAi();
+    if (!card || !viewerOwnsViewedCard()) return;
+    var plan = aiPlan(card);
+    if (!plan.all.length) { showToast("העלו סרטון משחק כדי לקבל AI Rating", 3500); return; }
+    var queue = mode === "all" ? plan.all.filter(videoIsMarked) : plan.pending;
+    if (!queue.length) {
+      if (plan.unmarked.length && !plan.done.length) showToast("סמנו את עצמכם בסרטון לפני הניתוח", 3500);
+      else showToast("כל הסרטונים כבר נותחו", 2500);
+      return;
+    }
+    aiRun = {
+      running: true,
+      stage: "wake",
+      startedAt: Date.now(),
+      items: plan.all.map(function (v, i) {
+        var queued = queue.indexOf(v) >= 0;
+        var status = queued ? "waiting" : plan.done.indexOf(v) >= 0 ? "cached" : "unmarked";
+        return { v: v, idx: i, queued: queued, status: status, expectedMs: expectedMsFor(v), frac: 0 };
+      })
+    };
+    rerenderAfterAi();
+    var ticker = setInterval(tickAiRun, 200);
+    var queued = aiRun.items.filter(function (it) { return it.queued; });
+    wakeAiServer().then(function () {
+      aiRun.stage = "video";
+      // Sequential: one request per video.
+      var stopped = null;
+      return queued.reduce(function (chain, item) {
+        return chain.then(function () {
+          // After a rate-limit/quota answer the next requests would fail too: mark them, don't send.
+          if (stopped) { item.status = "failed"; item.error = stopped.error; refreshAiRunList(); return null; }
+          return analyzeOne(card, item).then(function () {
+            if (item.status === "failed" && (item.code === "rate_limited" || item.code === "ai_quota" || item.code === "not_configured")) stopped = item;
+          });
+        });
+      }, Promise.resolve());
+    }, function () {
+      queued.forEach(function (it) { it.status = "failed"; it.error = "השרת לא זמין"; });
+      throw Object.assign(new Error("wake-failed"), { userMessage: "שרת ה-AI לא זמין כרגע. נסו שוב בעוד דקה" });
+    }).then(function () {
+      var ok = queued.filter(function (it) { return it.status === "done"; }).length;
+      var failed = queued.length - ok;
+      aiRun.running = false;
+      aiRun.summary = failed
+        ? (ok ? ok + " נותחו, " + failed + " נכשלו. אפשר לנסות שוב את מה שנכשל." : "הניתוח נכשל. נסו שוב.")
+        : (queued.length === 1 ? "הסרטון נותח והדירוג עודכן." : queued.length + " סרטונים נותחו והדירוג עודכן.");
+      if (ok) aiState.justRated = true;
+      var firstErr = queued.filter(function (it) { return it.status === "failed"; })[0];
+      if (failed) showToast(firstErr && firstErr.error ? firstErr.error + (ok ? " · " + ok + " סרטונים נותחו" : "") : "ניתוח ה-AI נכשל. נסו שוב", 4500);
+      else showToast("ה-AI Rating עודכן. שתפו שוב את הקישור כדי שכולם יראו", 4000);
+    }).catch(function (err) {
+      aiRun.running = false;
+      aiRun.summary = "הניתוח לא התחיל.";
       showToast(aiErrorMessage(err), 4500);
-    }).then(function () { clearTimeout(timer); });
+    }).then(function () {
+      clearInterval(ticker);
+      rerenderAfterAi();
+      if (aiRun && aiRun.items.some(function (it) { return it.queued && it.status === "done"; })) {
+        setTimeout(maybeAskLevelRange, 600);
+      }
+    });
   }
 
   function rerenderAfterAi() {
@@ -2782,10 +3397,7 @@
     if (aiState.justRated) {
       aiState.justRated = false;
       var line = document.querySelector("#card-root .ut-ai-line");
-      if (line) {
-        toggleAiDetails(line, true);
-        line.scrollIntoView({ block: "center", behavior: "smooth" });
-      }
+      if (line) toggleAiDetails(line, true);
     }
   }
 
@@ -2804,8 +3416,17 @@
     if (!t || !t.closest) return;
     var line = t.closest(".ut-ai-line");
     if (line) { toggleAiDetails(line); return; }
-    if (t.closest("#ai-rate-btn")) { ev.preventDefault(); requestAiRating(); }
+    var btn = t.closest("#ai-rate-btn");
+    if (btn) {
+      ev.preventDefault();
+      if (btn.getAttribute("data-mode") === "none") { showToast("כל הסרטונים כבר נותחו. אפשר לנתח מחדש מהקישור למטה", 3000); return; }
+      requestAiRating("new");
+      return;
+    }
+    if (t.closest("#ai-reanalyze-btn")) { ev.preventDefault(); requestAiRating("all"); }
   });
+
+  window.addEventListener("hashchange", function () { if (aiRun && !aiRun.running) aiRun = null; });
 
   function localOwnerId() {
     return (state.profile && state.profile.id) || "";
@@ -3322,6 +3943,11 @@
   }
 
   loadSaved();
+  try {
+    var hadPerVideo = state.videos.some(function (v) { return !!v.ai; });
+    migrateLegacyAi();
+    if (!hadPerVideo && state.videos.some(function (v) { return !!v.ai; })) persist();
+  } catch (err) { console.warn("ai migrate", err); }
   bind();
   render();
 })();

@@ -198,15 +198,25 @@ const MESSAGES = {
 /* ---------- mock ---------- */
 function mockModelJson(videos) {
   const totalSec = videos.reduce((s, v) => s + (v.duration || 0), 0);
+  // Deterministic variety per clip (by length), so combining several mock clips is visible in tests.
+  const variants = [
+    { level: "C1", confidence: "medium", subs: { volley: 7, bandeja: 5, vibora: 4, smash: 6, wall_play: 4, positioning: 7, consistency: 5, rally_pace: 6 },
+      he: "תוצאת בדיקה (MOCK): וולי יציב ועלייה טובה לרשת יחד עם השותף. חסרה עקביות בהוצאת כדורים מהזכוכית האחורית." },
+    { level: "B2", confidence: "medium", subs: { volley: 7, bandeja: 6, vibora: 5, smash: 7, wall_play: 6, positioning: 7, consistency: 6, rally_pace: 7 },
+      he: "תוצאת בדיקה (MOCK): בנדחה בשליטה וקריאה טובה של המשחק. לפעמים נשאר מאחור כשהשותף עולה לרשת." },
+    { level: "C2", confidence: "low", subs: { volley: 5, bandeja: null, vibora: null, smash: 4, wall_play: 5, positioning: 5, consistency: 5, rally_pace: 4 },
+      he: "תוצאת בדיקה (MOCK): מחזיק ראלי בקצב סביר. קטע קצר, קשה לראות חבטות מעל הראש." }
+  ];
+  const v = variants[Math.round(totalSec) % variants.length];
   return {
     player_found: true,
     player_description: "MOCK: player in a black shirt and white shorts on the near half, right side",
     observed_seconds: Math.round(totalSec),
-    level: "C1",
-    confidence: "medium",
+    level: v.level,
+    confidence: v.confidence,
     confidence_reason: "MOCK result",
-    explanation_he: "תוצאת בדיקה (MOCK): וולי יציב ועלייה טובה לרשת יחד עם השותף. חסרה עקביות בהוצאת כדורים מהזכוכית האחורית ובבנדחה תחת לחץ.",
-    subscores: { volley: 7, bandeja: 5, vibora: 4, smash: 6, wall_play: 4, positioning: 7, consistency: 5, rally_pace: 6 }
+    explanation_he: v.he,
+    subscores: v.subs
   };
 }
 
@@ -249,7 +259,9 @@ async function handleRating(req, res) {
       prepared.push({ buf: fetched.buf, mimeType: /^video\//.test(fetched.mimeType) ? fetched.mimeType : "video/mp4", duration, description: desc });
     }
     const totalSeconds = prepared.reduce((s, v) => s + (v.duration || 0), 0);
-    const prompt = rating.buildPrompt(prepared, profile);
+    // perVideo: the client sends one clip per request and combines the results itself.
+    const perVideo = body.perVideo === true && prepared.length === 1;
+    const prompt = rating.buildPrompt(prepared, profile, { perVideo });
     let modelJson, usage = null, modelName = MODEL;
     if (MOCK) {
       await new Promise((r) => setTimeout(r, Number(process.env.MOCK_DELAY_MS) || 2500));
@@ -270,7 +282,7 @@ async function handleRating(req, res) {
       modelName = out.model;
       modelJson = rating.parseModelJson(out.text);
     }
-    const result = rating.normalizeResult(modelJson, { totalSeconds, videoCount: prepared.length, model: modelName });
+    const result = rating.normalizeResult(modelJson, { totalSeconds, videoCount: prepared.length, model: modelName, perVideo });
     if (MOCK) result.mock = true;
     log("ai-rating ok", JSON.stringify({ cardId, ip, videos: prepared.length, bytes: totalBytes, sec: Math.round(totalSeconds), ms: Date.now() - started, level: result.level, conf: result.confidence, usage }));
     if (process.env.DEBUG_PROMPT === "1") result.prompt = prompt;

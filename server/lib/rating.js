@@ -106,8 +106,9 @@ function levelTable() {
   return LEVELS.map((l) => `- ${l.id} (${l.numeric}, ${l.title}): ${l.blurb}`).join("\n");
 }
 
-function buildPrompt(videos, profile) {
+function buildPrompt(videos, profile, opts) {
   profile = profile || {};
+  opts = opts || {};
   const totalSec = videos.reduce((s, v) => s + (v.duration || 0), 0);
   const parts = [];
   parts.push(
@@ -139,7 +140,9 @@ What to evaluate for the marked player, each as an integer 0-10 (0 = very weak, 
 Rules:
 - Base the rating ONLY on what you actually see the marked player do. Do not guess from age, gender, or clothing.
 - If you cannot reliably tell which player is the marked one, set player_found=false and confidence="low".
-- Total footage is about ${totalSec ? fmtTime(totalSec) : "unknown length"}. If the total footage is shorter than about 2 minutes, or the player is visible in only a few rallies, confidence MUST be "low". Use "high" only with several minutes of clear footage showing many different shots.
+${opts.perVideo
+  ? `- This clip (about ${totalSec ? fmtTime(totalSec) : "unknown length"}) is ONE of several clips of the same player. Each clip is rated separately and the results are combined later, weighted by clip length and confidence. Judge confidence only by how much of the player's game THIS clip shows: "low" if it shows only a few rallies, is shorter than about a minute, or the player is hard to see; "medium" for a few minutes of clear rallies; "high" only for many varied shots seen clearly.`
+  : `- Total footage is about ${totalSec ? fmtTime(totalSec) : "unknown length"}. If the total footage is shorter than about 2 minutes, or the player is visible in only a few rallies, confidence MUST be "low". Use "high" only with several minutes of clear footage showing many different shots.`}
 - explanation_he: 1-2 short sentences in natural Hebrew (max 200 characters) explaining the level, mentioning a concrete strength and a concrete weakness you saw.
 - player_description: short English description of the person you rated (clothing, position), so we can confirm you rated the right player.
 - Respond with STRICT JSON only, matching the schema. No markdown, no comments, no extra keys.`);
@@ -191,10 +194,12 @@ function normalizeResult(raw, ctx) {
   const level = LEVEL_IDS.includes(String(raw.level || "").toUpperCase()) ? String(raw.level).toUpperCase() : null;
   if (!level) throw new Error("model returned an unknown level: " + raw.level);
   let confidence = ["low", "medium", "high"].includes(raw.confidence) ? raw.confidence : "low";
+  const modelConfidence = confidence;
   const found = raw.player_found !== false;
   const notes = [];
   if (!found) { confidence = "low"; notes.push("player_not_found"); }
-  if ((ctx.totalSeconds || 0) < MIN_SECONDS_FOR_CONFIDENCE) {
+  // Per-video mode: the client combines clips and applies the total-length rule itself.
+  if (!ctx.perVideo && (ctx.totalSeconds || 0) < MIN_SECONDS_FOR_CONFIDENCE) {
     if (confidence !== "low") notes.push("short_footage");
     confidence = "low";
   }
@@ -210,6 +215,8 @@ function normalizeResult(raw, ctx) {
     levelNumeric: lv.numeric,
     levelTitle: lv.title,
     confidence,
+    modelConfidence,
+    perVideo: !!ctx.perVideo,
     explanation: truncate(raw.explanation_he || "", 200),
     subscores: subs,
     playerFound: found,
