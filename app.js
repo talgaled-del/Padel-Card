@@ -712,8 +712,14 @@
       }
     }
 
+    if (parts[0] === "terms" || parts[0] === "privacy" || parts[0] === "copyright") {
+      state.view = "legal";
+      state.legalPage = parts[0];
+      return;
+    }
+
     var route = parts[0] || "home";
-    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1 };
+    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1, terms: 1, privacy: 1, copyright: 1 };
     if (route === "result" && !state.levelId) { state.view = "quiz"; return; }
     if (route === "profile" && !state.levelId) { state.view = "quiz"; return; }
     if ((route === "card" || route === "share" || route === "pair") && (!state.profile || !state.levelId)) {
@@ -731,6 +737,7 @@
 
   function gateOwnerViews() {
     if (isVisitorView()) return;
+    if (state.view === "legal") return;
     if (state.view === "admin" || state.view === "admin-view") {
       gateAdminView();
       return;
@@ -4056,7 +4063,7 @@
   function render() {
     parseRoute();
     var visual = state.view === "admin-view" ? "card" : state.view;
-    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot", "admin", "unavailable"].forEach(function (name) {
+    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot", "admin", "unavailable", "legal"].forEach(function (name) {
       var el = $("view-" + name);
       if (el) el.classList.toggle("hidden", visual !== name);
     });
@@ -4076,6 +4083,8 @@
     if (state.view === "pair") renderPair();
     if (state.view === "share") renderShare();
     if (state.view === "admin" && window.PadelAdmin && PadelAdmin.render) PadelAdmin.render();
+    if (state.view === "legal" && window.PadelLegal && PadelLegal.renderPage) PadelLegal.renderPage();
+    if (window.PadelLegal && PadelLegal.renderChrome) PadelLegal.renderChrome(state);
     var showcase = visual === "card" || visual === "pair";
     document.body.classList.toggle("mode-showcase", showcase);
     document.body.classList.remove("has-dock");
@@ -4107,14 +4116,22 @@
     // Do not call input.click() from a label handler: when the tap already
     // hit the input (always, with the overlay), a second programmatic click
     // can open then immediately cancel the iOS picker.
+    function withMediaConsent(fn) {
+      if (!window.PadelLegal || typeof PadelLegal.promptMediaConsent !== "function" || PadelLegal.hasMediaConsent()) {
+        fn();
+        return;
+      }
+      PadelLegal.promptMediaConsent().then(function (ok) { if (ok) fn(); });
+    }
     $("video-file").addEventListener("change", function (ev) {
       // Copy off the live FileList before resetting the input — clearing
       // value empties the live list, which would drop the chosen files.
       var files = ev.target.files ? Array.from(ev.target.files) : [];
       ev.target.value = "";
-      addVideoFiles(files);
+      if (!files.length) return;
+      withMediaConsent(function () { addVideoFiles(files); });
     });
-    $("add-link").addEventListener("click", addVideoLink);
+    $("add-link").addEventListener("click", function () { withMediaConsent(addVideoLink); });
     $("add-court").addEventListener("click", addCourt);
     $("court-input").addEventListener("keydown", function (ev) {
       if (ev.key === "Enter") { ev.preventDefault(); addCourt(); }
@@ -4122,13 +4139,13 @@
     $("photo-file").addEventListener("change", function (ev) {
       var file = ev.target.files && ev.target.files[0];
       ev.target.value = "";
-      if (file) onPhotoSelected(file);
+      if (file) withMediaConsent(function () { onPhotoSelected(file); });
     });
     document.addEventListener("change", function (ev) {
       if (!ev.target || ev.target.id !== "card-photo-file") return;
       var file = ev.target.files && ev.target.files[0];
       ev.target.value = "";
-      if (file) onPhotoSelected(file);
+      if (file) withMediaConsent(function () { onPhotoSelected(file); });
     });
     $("photo-retry").addEventListener("click", retryPhotoUpload);
     document.addEventListener("click", function (ev) {
@@ -4308,15 +4325,24 @@
             return;
           }
           state.disabledNotice = false;
-          state.authReady = true;
-          if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
-          var hash = (location.hash || "").replace(/^#\/?/, "");
-          var wantsAdmin = hash.indexOf("admin") === 0;
-          if (source === "sign-in") {
-            if (wantsAdmin && state.isAdmin) go("admin");
-            else go(state.profile && state.levelId ? "card" : "home");
+          var afterLegal = function () {
+            state.authReady = true;
+            if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+            var hash = (location.hash || "").replace(/^#\/?/, "");
+            var wantsAdmin = hash.indexOf("admin") === 0;
+            var onLegal = hash === "terms" || hash === "privacy" || hash === "copyright";
+            if (source === "sign-in") {
+              if (onLegal) render();
+              else if (wantsAdmin && state.isAdmin) go("admin");
+              else go(state.profile && state.levelId ? "card" : "home");
+            } else {
+              render();
+            }
+          };
+          if (window.PadelLegal && typeof PadelLegal.onSignedIn === "function") {
+            PadelLegal.onSignedIn().then(afterLegal).catch(afterLegal);
           } else {
-            render();
+            afterLegal();
           }
         });
       };
@@ -4327,6 +4353,7 @@
       state.auth = null;
       state.isAdmin = false;
       clearOwnerFromView();
+      if (window.PadelLegal && PadelLegal.onSignedOut) PadelLegal.onSignedOut();
     } else {
       state.auth = null;
       state.isAdmin = false;
@@ -4371,6 +4398,12 @@
   }
 
   bind();
+  if (window.PadelLegal) {
+    PadelLegal.init({
+      go: go,
+      showToast: showToast
+    });
+  }
   if (window.PadelAdmin) {
     PadelAdmin.init({
       go: go,

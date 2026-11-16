@@ -158,6 +158,22 @@
     cooldownTimer = setTimeout(tickCooldown, 250);
   }
 
+
+  function requireLegalConsent(errorId) {
+    if (window.PadelLegal && typeof PadelLegal.canStartAuth === "function" && !PadelLegal.canStartAuth()) {
+      showError(errorId || "auth-error", "יש לאשר את תנאי השימוש ואת מדיניות הפרטיות כדי להמשיך.");
+      var box = $("auth-legal-accept");
+      if (box) {
+        box.focus();
+        var label = $("auth-legal-label");
+        if (label && label.scrollIntoView) label.scrollIntoView({ block: "center" });
+      }
+      return false;
+    }
+    if (window.PadelLegal && typeof PadelLegal.rememberIntent === "function") PadelLegal.rememberIntent();
+    return true;
+  }
+
   function sendOtp(email) {
     if (!client) return Promise.resolve({ error: { message: "not configured" } });
     return client.auth.signInWithOtp({
@@ -180,6 +196,7 @@
   function submitEmail(ev) {
     if (ev) ev.preventDefault();
     showError("auth-error", "");
+    if (!requireLegalConsent("auth-error")) return;
     if (!isConfigured() || !client) {
       showError("auth-error", "ההתחברות עדיין לא הוגדרה.");
       return;
@@ -292,6 +309,7 @@
 
   function signInGoogle() {
     showError("auth-error", "");
+    if (!requireLegalConsent("auth-error")) return;
     if (!isConfigured() || !client) {
       showError("auth-error", "ההתחברות עדיין לא הוגדרה.");
       return;

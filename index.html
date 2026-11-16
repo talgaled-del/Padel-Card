@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v16/styles.css" />
-  <link rel="stylesheet" href="v16/cards.css" />
+  <link rel="stylesheet" href="v17/styles.css" />
+  <link rel="stylesheet" href="v17/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -145,6 +145,7 @@
                 <span id="photo-upload-progress-label">מעלה תמונה…</span>
               </div>
               <p class="note">התמונה נשמרת בענן ומופיעה בחדות בכרטיס ובקישור המשותף.</p>
+              <p class="note legal-media-note">בהעלאה אתם מאשרים שהתמונה שלכם או שיש לכם רשות להשתמש בה, ושאנשים שמופיעים בה הסכימו לשיתוף.</p>
             </div>
           </div>
         </div>
@@ -263,6 +264,7 @@
         <div class="field">
           <span class="legend">סרטוני משחק</span>
           <p class="note">העלו סרטון משחק מהגלריה או מהמצלמה (עד 3 סרטונים, עד 100MB ו־3 דקות לכל אחד). אחרי ההעלאה תתבקשו לסמן את עצמכם בסרטון, כדי שהמארגן יידע על מי להתמקד. אפשר גם להוסיף קישור חיצוני.</p>
+          <p class="note legal-media-note">בהעלאה אתם מאשרים שיש לכם זכויות בסרטון, ושאנשים שמופיעים בו הסכימו להופיע בו ולשיתוף בכרטיס.</p>
           <label class="upload" for="video-file">
             <input id="video-file" type="file" accept="video/*,video/quicktime,video/mp4,.mov,.mp4,.m4v,.hevc,.MOV,.MP4,.M4V" multiple />
             <strong>העלאת סרטון מהמכשיר</strong>
@@ -295,6 +297,10 @@
         <div id="auth-step-methods">
           <h1>התחברות</h1>
           <p class="lede">התחברו כדי ליצור ולשמור את כרטיס השחקן שלכם. הכרטיס נשמר בחשבון, ואפשר לפתוח אותו מכל מכשיר.</p>
+          <label class="legal-check" id="auth-legal-label">
+            <input type="checkbox" id="auth-legal-accept" />
+            <span>קראתי ואני מסכים/ה ל<a href="#/terms">תנאי השימוש</a> ול<a href="#/privacy">מדיניות הפרטיות</a></span>
+          </label>
           <div class="auth-note hidden" id="auth-unconfigured" role="status">
             ההתחברות עדיין לא הוגדרה. אי אפשר ליצור כרטיס בלי חשבון.
           </div>
@@ -457,6 +463,11 @@
           <button class="btn btn-ghost hidden" id="owner-logout" type="button">התנתקות</button>
         </div>
       </div>
+      <p class="share-legal hidden" id="share-legal">
+        <a href="#/terms">תנאי שימוש</a>
+        <span aria-hidden="true">·</span>
+        <a href="#/privacy">מדיניות פרטיות</a>
+      </p>
     </section>
 
     <section id="view-pair" class="view hidden">
@@ -480,6 +491,11 @@
         </a>
         <button class="btn btn-ghost hidden" id="pair-back-card" type="button">חזרה לכרטיס שלי</button>
       </div>
+      <p class="share-legal hidden" id="pair-share-legal">
+        <a href="#/terms">תנאי שימוש</a>
+        <span aria-hidden="true">·</span>
+        <a href="#/privacy">מדיניות פרטיות</a>
+      </p>
     </section>
 
     <section id="view-share" class="view hidden">
@@ -504,6 +520,17 @@
         <button class="btn btn-ghost" id="share-back" type="button">חזרה</button>
       </div>
     </section>
+
+    <section id="view-legal" class="view hidden"></section>
+
+    <footer class="site-footer hidden" id="site-footer">
+      <p class="site-copy">© 2026 Padel Card. כל הזכויות שמורות</p>
+      <nav class="site-legal-nav" aria-label="מסמכים משפטיים">
+        <a href="#/terms">תנאי שימוש</a>
+        <a href="#/privacy">מדיניות פרטיות</a>
+        <a href="#/copyright">זכויות יוצרים</a>
+      </nav>
+    </footer>
   </div>
   <div id="link-fallback" class="link-fallback hidden" role="dialog" aria-modal="true" aria-labelledby="link-fallback-title">
     <div class="link-fallback-card">
@@ -557,14 +584,49 @@
     </div>
   </div>
 
+
+  <div id="legal-pending-bar" class="legal-pending-bar hidden">
+    <button class="btn btn-ghost" id="legal-pending-back" type="button">חזרה לאישור</button>
+    <span>אחרי הקריאה אפשר לאשר ולהמשיך</span>
+  </div>
+
+  <div id="legal-consent-modal" class="legal-modal hidden" role="dialog" aria-modal="true" aria-labelledby="legal-consent-title">
+    <form class="legal-modal-card" id="legal-consent-form">
+      <p class="eyebrow">לפני שממשיכים</p>
+      <h2 id="legal-consent-title">אישור תנאי השימוש</h2>
+      <p class="lede">כדי להשתמש בכרטיס השחקן יש לקרוא ולאשר את תנאי השימוש ואת מדיניות הפרטיות. האישור נדרש פעם אחת, או כשהמסמכים מתעדכנים.</p>
+      <label class="legal-check">
+        <input type="checkbox" id="legal-modal-accept" required />
+        <span>קראתי ואני מסכים/ה ל<a href="#/terms">תנאי השימוש</a> ול<a href="#/privacy">מדיניות הפרטיות</a></span>
+      </label>
+      <button class="btn btn-primary" type="submit">אישור והמשך</button>
+    </form>
+  </div>
+
+  <div id="legal-media-modal" class="legal-modal hidden" role="dialog" aria-modal="true" aria-labelledby="legal-media-title">
+    <div class="legal-modal-card">
+      <h2 id="legal-media-title">לפני העלאת תמונה או סרטון</h2>
+      <p class="lede">אתם מאשרים שהתוכן שלכם או שיש לכם רשות להשתמש בו, ושאנשים שמופיעים בתמונות ובסרטונים הסכימו להופיע בהם ולשיתוף בכרטיס. האישור נשמר בחשבון.</p>
+      <label class="legal-check">
+        <input type="checkbox" id="legal-media-accept" />
+        <span>אני מאשר/ת שיש לי את הזכויות ואת ההסכמות הנדרשות</span>
+      </label>
+      <div class="btn-row two" style="margin-top:14px">
+        <button class="btn btn-ghost" id="legal-media-no" type="button">ביטול</button>
+        <button class="btn btn-primary" id="legal-media-yes" type="button">אישור</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="status"></div>
-  <script src="v16/config.js"></script>
+  <script src="v17/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
-  <script src="v16/quiz.js"></script>
-  <script src="v16/players.js"></script>
-  <script src="v16/track.js"></script>
-  <script src="v16/auth.js"></script>
-  <script src="v16/admin.js"></script>
-  <script src="v16/app.js"></script>
+  <script src="v17/quiz.js"></script>
+  <script src="v17/players.js"></script>
+  <script src="v17/track.js"></script>
+  <script src="v17/auth.js"></script>
+  <script src="v17/admin.js"></script>
+  <script src="v17/legal.js"></script>
+  <script src="v17/app.js"></script>
 </body>
 </html>

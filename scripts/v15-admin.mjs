@@ -69,7 +69,9 @@ export async function ensureUser(email) {
     })
   });
   if (created.ok && created.body && created.body.id) {
-    return { id: created.body.id, email: addr, password: password };
+    const user = { id: created.body.id, email: addr, password: password };
+    if (/@example\.com$/i.test(addr)) await setLegalAcceptance(user.id).catch(function () {});
+    return user;
   }
   const listed = await adminFetch("/auth/v1/admin/users?page=1&per_page=200", { method: "GET" });
   if (!listed.ok) throw new Error("list users failed: " + errMsg(listed, "list"));
@@ -81,7 +83,9 @@ export async function ensureUser(email) {
     body: JSON.stringify({ password: password, email_confirm: true })
   });
   if (!updated.ok) throw new Error("could not reset test user password: " + errMsg(updated, "update"));
-  return { id: existing.id, email: addr, password: password };
+  const user = { id: existing.id, email: addr, password: password };
+  if (/@example\.com$/i.test(addr)) await setLegalAcceptance(user.id).catch(function () {});
+  return user;
 }
 
 export async function ensureTestUser() {
@@ -183,4 +187,28 @@ export async function cleanupExampleTestUsers(pattern) {
     await deleteTestUser(u.id);
   }
   return matches.length;
+}
+
+
+export async function setLegalAcceptance(userId, opts = {}) {
+  if (!userId) return;
+  const body = {
+    user_id: userId,
+    terms_version: opts.version || "2026-11-16",
+    accepted_at: opts.acceptedAt || new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  if (opts.media) body.media_consent_at = opts.mediaAt || new Date().toISOString();
+  const res = await adminFetch("/rest/v1/legal_acceptances", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok && res.status !== 409) throw new Error("setLegalAcceptance failed: " + errMsg(res, "legal"));
+}
+
+export async function clearLegalAcceptance(userId) {
+  if (!userId) return;
+  const res = await adminFetch("/rest/v1/legal_acceptances?user_id=eq." + encodeURIComponent(userId), { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error("clearLegalAcceptance failed: " + errMsg(res, "clear legal"));
 }

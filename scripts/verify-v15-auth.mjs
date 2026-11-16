@@ -67,6 +67,11 @@ assert(/התחברו כדי ליצור ולשמור את כרטיס השחקן �
 assert(boot.unconfiguredHidden, "unconfigured banner is hidden (keys are set)");
 assert(boot.google && boot.email, "Google and email controls are present");
 assert(boot.hiw === 5, "how-it-works steps appear on the login screen");
+const legalBox = await page.$("#auth-legal-accept");
+if (legalBox) {
+  assert(await page.locator("#auth-legal-label").textContent().then((s) => /תנאי השימוש/.test(s || "") && /מדיניות הפרטיות/.test(s || "")), "login consent checkbox is present with legal links");
+  await page.check("#auth-legal-accept");
+}
 await snap(page, "v15-login.png");
 
 await page.fill("#auth-email", EMAIL);

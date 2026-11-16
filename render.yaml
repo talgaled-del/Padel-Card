@@ -14,7 +14,7 @@ services:
       - path: /index.html
         name: Cache-Control
         value: no-cache, no-store, must-revalidate
-      - path: /v16/*
+      - path: /v17/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
 
