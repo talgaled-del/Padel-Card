@@ -2012,3 +2012,111 @@ body:has(#legal-pending-bar:not(.hidden)) #app { padding-bottom: calc(72px + var
   min-height: 74px;
 }
 .admin-req-counts { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+
+
+/* v21 pending-request banner + red count badge */
+.req-home-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  text-decoration: none;
+  color: #3a1008;
+  background: linear-gradient(180deg, #ffd3c4, #ffb199);
+  border: 1px solid rgba(200, 40, 20, 0.25);
+  box-shadow: 0 8px 24px rgba(200, 40, 20, 0.18);
+  font-weight: 800;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+.req-home-banner.hidden { display: none; }
+.req-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e11d1d;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.35);
+}
+.req-count-badge.hidden { display: none; }
+.req-top-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-inline-start: 4px;
+  text-decoration: none;
+}
+.req-top-badge.hidden { display: none; }
+.account-chip { position: relative; }
+.req-rater.is-self { opacity: 0.55; }
+
+
+/* v21 empty-account CTA, email result, player rating banner, level select */
+.home-empty-card {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(200, 255, 60, 0.12);
+  border: 1px solid rgba(200, 255, 60, 0.35);
+  font-weight: 700;
+  color: var(--text);
+}
+.home-empty-card.hidden { display: none; }
+.rated-home-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  text-decoration: none;
+  color: #14240c;
+  background: linear-gradient(180deg, #e8ff9a, #c8ff3c);
+  border: 1px solid rgba(80, 140, 10, 0.28);
+  box-shadow: 0 8px 24px rgba(80, 140, 10, 0.16);
+  font-weight: 800;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+.rated-home-banner.hidden { display: none; }
+.certified-level-select {
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(8, 20, 14, 0.9);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+}
+.req-send-result {
+  display: grid;
+  gap: 10px;
+  text-align: center;
+  padding: 8px 0 4px;
+}
+.req-send-result.hidden { display: none; }
+.req-send-result .req-mail-ok,
+.req-send-result .req-mail-wait {
+  margin: 0;
+  font-weight: 800;
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+.req-send-result .req-mail-wait { font-weight: 700; color: var(--muted); font-size: 0.95rem; }
+.req-send-result .req-mail-fail { margin: 0; font-weight: 800; color: #ffb4b4; }
+.req-send-result .req-mail-row { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line-strong); }
+.req-send-result .req-mail-row:last-of-type { border-bottom: 0; }
+.req-mine-mail { display: block; margin-top: 4px; font-size: 0.75rem; color: #c8ff3c; font-weight: 700; }

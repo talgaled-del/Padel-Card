@@ -10,7 +10,7 @@
     go: function () {},
     onChanged: function () {}
   };
-  var cache = { mine: null, inbox: null, raters: null };
+  var cache = { mine: null, inbox: null, raters: null, unseen: [] };
   var picked = {};
 
   function $(id) { return document.getElementById(id); }
@@ -26,9 +26,16 @@
   function rpc(name, args) {
     var c = hooks.getClient();
     if (!c) return Promise.reject(new Error("not configured"));
-    return c.rpc(name, args || {}).then(function (res) {
-      if (res.error) throw res.error;
-      return res.data;
+    var run = function () {
+      return c.rpc(name, args || {}).then(function (res) {
+        if (res.error) throw res.error;
+        return res.data;
+      });
+    };
+    if (!c.auth || !c.auth.getSession) return run();
+    return c.auth.getSession().then(function (s) {
+      if (!(s && s.data && s.data.session)) throw new Error("not authorized");
+      return run();
     });
   }
 
@@ -50,6 +57,7 @@
     if (/request not found/.test(low)) return "הבקשה לא נמצאה.";
     if (/not your card/.test(low)) return "אפשר לבקש דירוג רק לכרטיס שלכם.";
     if (/not authorized/.test(low)) return "אין הרשאה לפעולה הזו.";
+    if (/permission denied/.test(low)) return "אין הרשאה לפעולה הזו. ודאו שאתם מחוברים לחשבון הנכון.";
     if (window.PadelCertified && PadelCertified.hebrewError) return PadelCertified.hebrewError(err);
     return msg || "הפעולה נכשלה. נסו שוב.";
   }
@@ -75,17 +83,39 @@
     return s || "";
   }
 
-  function notify(requestId, kind) {
+  function parseNotifyResult(res, err) {
+    if (err) return { ok: false, skipped: false, error: err };
+    var data = res && res.data;
+    if (res && res.error && !data) return { ok: false, skipped: false, error: res.error };
+    if (data && data.error && !data.ok) {
+      return { ok: false, skipped: !!data.skipped, error: data.error };
+    }
+    if (data && (data.ok || data.skipped)) {
+      return { ok: !!data.ok && !data.error, skipped: !!data.skipped, id: data.id };
+    }
+    if (data && data.id) return { ok: true, skipped: false, id: data.id };
+    return { ok: false, skipped: false };
+  }
+
+  function notify(requestId, kind, extra) {
     var c = hooks.getClient();
-    if (!c || !requestId) return Promise.resolve();
-    return c.functions.invoke("notify-rating-request", {
-      body: { request_id: requestId, kind: kind || "new" }
-    }).then(function (res) {
-      if (res.error) console.warn("notify-rating-request", res.error);
-      return res;
+    if (!c) return Promise.resolve({ ok: false });
+    var body = Object.assign({ kind: kind || "new" }, extra || {});
+    if (requestId) body.request_id = requestId;
+    return c.functions.invoke("notify-rating-request", { body: body }).then(function (res) {
+      var out = parseNotifyResult(res);
+      if (!out.ok && !out.skipped) console.warn("notify-rating-request", res && (res.error || res.data));
+      return out;
     }).catch(function (err) {
       console.warn("notify-rating-request", err);
+      return parseNotifyResult(null, err);
     });
+  }
+
+  function notifyPlayerRated(cardId, saved) {
+    if (saved && saved.request_id) return notify(saved.request_id, "done");
+    if (cardId) return notify(null, "rated", { card_id: cardId });
+    return Promise.resolve({ ok: false });
   }
 
   function loadMine() {
@@ -152,7 +182,6 @@
           "</div>" +
           '<div class="req-inbox-actions">' +
             '<button type="button" class="btn btn-star" data-req-act="rate">דרג</button>' +
-            '<button type="button" class="btn btn-ghost" data-req-act="decline">דחייה</button>' +
           "</div>" +
         "</li>";
       }).join("") + "</ul></div>";
@@ -167,23 +196,28 @@
       return;
     }
     root.classList.remove("hidden");
-    var rows = list.length
-      ? '<ul class="req-mine-list">' + list.map(function (r) {
+    var visible = list.filter(function (r) { return r.status !== "declined"; });
+    var rows = visible.length
+      ? '<ul class="req-mine-list">' + visible.map(function (r) {
           var st = r.status || "";
           var cancel = st === "pending"
             ? '<button type="button" class="text-btn" data-req-act="cancel" data-request-id="' + escapeHtml(r.id) + '">ביטול</button>'
+            : "";
+          var mail = (r.email_status === "sent" && r.email_sent_at)
+            ? '<span class="req-mine-mail">מייל נשלח · ' + escapeHtml(fmtDate(r.email_sent_at)) + "</span>"
             : "";
           return '<li class="req-mine-item is-' + escapeHtml(st) + '">' +
             '<span class="req-status">' + escapeHtml(statusLabel(st)) + "</span>" +
             "<strong>" + escapeHtml(r.rater_name || "מוסמך") + "</strong>" +
             '<span class="req-date">' + escapeHtml(fmtDate(r.created_at)) + "</span>" +
+            mail +
             cancel +
           "</li>";
         }).join("") + "</ul>"
       : '<p class="note">עדיין לא נשלחו בקשות דירוג.</p>';
     root.innerHTML = '<div class="req-mine">' +
       '<div class="req-mine-head">' +
-        "בקשות דירוג כוכב" +
+        "בקשות דירוג מוסמך" +
         (pendingCount(list) ? " · " + pendingCount(list) + " ממתינות" : "") +
       "</div>" + rows + "</div>";
   }
@@ -196,14 +230,21 @@
 
   function openPicker() {
     if (!hooks.hasCard()) {
-      hooks.showToast("צרו כרטיס כדי לבקש דירוג כוכב");
+      hooks.showToast("צרו כרטיס כדי לבקש דירוג ממוסמך");
       return;
     }
     picked = {};
     var box = $("req-picker");
     if (!box) return;
+    var form = $("req-picker-form");
+    var result = $("req-picker-result");
+    if (form) form.classList.remove("hidden");
+    if (result) {
+      result.classList.add("hidden");
+      result.innerHTML = "";
+    }
     $("req-picker-list").innerHTML = '<p class="note">טוענים את רשימת המוסמכים…</p>';
-    $("req-picker-msg").value = "";
+    if ($("req-picker-msg")) $("req-picker-msg").value = "";
     box.classList.remove("hidden");
     loadRaters().then(function (list) {
       if (!list.length) {
@@ -211,12 +252,13 @@
         return;
       }
       $("req-picker-list").innerHTML = list.map(function (r) {
-        var ready = !!r.has_email;
+        var self = !!r.is_self;
+        var ready = !!r.has_email && !self;
         var pending = (cache.mine || []).some(function (q) {
           return q.rater_id === r.id && q.status === "pending";
         });
-        var cls = "req-rater" + (ready ? "" : " is-soon") + (pending ? " is-pending" : "");
-        var badge = ready ? (pending ? "בקשה ממתינה" : "") : "בקרוב";
+        var cls = "req-rater" + (ready ? "" : " is-soon") + (pending ? " is-pending" : "") + (self ? " is-self" : "");
+        var badge = self ? "זה החשבון המחובר" : (ready ? (pending ? "בקשה ממתינה" : "") : "בקרוב");
         return '<button type="button" class="' + cls + '" data-rater-id="' + escapeHtml(r.id) + '"' +
           (ready && !pending ? "" : " disabled") + ">" +
           "<strong>" + escapeHtml(r.full_name) + "</strong>" +
@@ -247,20 +289,70 @@
           p_card_id: cardId,
           p_message: msg || null
         }).then(function (row) {
-          created.push(row);
-          if (row && row.id) return notify(row.id, "new");
+          var item = { row: row, mail: null, raterName: (row && row.rater_name) || "" };
+          created.push(item);
+          if (row && row.id) {
+            return notify(row.id, "new").then(function (mail) { item.mail = mail; });
+          }
         });
       });
     });
     chain.then(function () {
-      closePicker();
-      hooks.showToast(created.length === 1 ? "הבקשה נשלחה" : "נשלחו " + created.length + " בקשות");
+      showSendResult(created);
       return refresh();
     }).catch(function (err) {
       hooks.showToast(hebrewError(err));
     }).then(function () {
       if (btn) btn.disabled = false;
       hooks.onChanged();
+    });
+  }
+
+  function showSendResult(items) {
+    var form = $("req-picker-form");
+    var box = $("req-picker-result");
+    if (!box) {
+      var n = items && items.length;
+      hooks.showToast(n === 1 ? "הבקשה נשלחה" : "נשלחו " + n + " בקשות");
+      closePicker();
+      return;
+    }
+    if (form) form.classList.add("hidden");
+    box.classList.remove("hidden");
+    box.innerHTML = (items || []).map(function (item) {
+      var name = (item.row && item.row.rater_name) || item.raterName || "המוסמך";
+      var mail = item.mail || {};
+      var sent = mail.ok && !mail.skipped;
+      if (sent) {
+        return '<div class="req-mail-row" data-request-id="' + escapeHtml(item.row.id) + '">' +
+          '<p class="req-mail-ok">✉️ נשלח מייל ל' + escapeHtml(name) + "</p>" +
+          '<p class="req-mail-wait">הבקשה ממתינה לדירוג</p>' +
+        "</div>";
+      }
+      return '<div class="req-mail-row" data-request-id="' + escapeHtml((item.row && item.row.id) || "") + '">' +
+        '<p class="req-mail-fail">הבקשה נשמרה, אך המייל לא נשלח</p>' +
+        '<button type="button" class="btn btn-primary" data-req-resend="' + escapeHtml((item.row && item.row.id) || "") + '">נסה שוב</button>' +
+      "</div>";
+    }).join("") + '<button type="button" class="btn btn-ghost" id="req-picker-result-close">סגירה</button>';
+  }
+
+  function resendRequestEmail(id, btn) {
+    if (!id) return;
+    if (btn) btn.disabled = true;
+    notify(id, "new").then(function (mail) {
+      var row = btn && btn.closest && btn.closest(".req-mail-row");
+      if (!row) return;
+      var sent = mail && mail.ok && !mail.skipped;
+      if (sent) {
+        var name = "";
+        (cache.mine || []).some(function (r) { if (r.id === id) { name = r.rater_name || ""; return true; } });
+        row.innerHTML = '<p class="req-mail-ok">✉️ נשלח מייל ל' + escapeHtml(name || "המוסמך") + "</p>" +
+          '<p class="req-mail-wait">הבקשה ממתינה לדירוג</p>';
+      } else {
+        hooks.showToast("המשלוח נכשל. נסו שוב.");
+        if (btn) btn.disabled = false;
+      }
+      return refresh();
     });
   }
 
@@ -279,19 +371,69 @@
     }).then(function () { hooks.onChanged(); });
   }
 
+
+  function paintPendingBadges(count) {
+    var n = count || 0;
+    var banner = $("req-home-banner");
+    var bannerText = $("req-home-banner-text");
+    var badge = $("home-req-count");
+    var top = $("req-top-badge");
+    var topCount = $("home-req-count-top");
+    var show = n > 0 && hooks.isRater();
+    if (bannerText) {
+      bannerText.textContent = n === 1
+        ? "יש לך בקשת דירוג ממתינה ⭐"
+        : "יש לך " + n + " בקשות דירוג ממתינות ⭐";
+    }
+    if (banner) banner.classList.toggle("hidden", !show);
+    if (badge) {
+      badge.textContent = show ? String(n) : "";
+      badge.classList.toggle("hidden", !show);
+    }
+    if (top) top.classList.toggle("hidden", !show);
+    if (topCount) topCount.textContent = show ? String(n) : "";
+  }
+
+  function loadUnseenRatings() {
+    if (!hooks.hasCard || !hooks.hasCard()) {
+      cache.unseen = [];
+      return Promise.resolve([]);
+    }
+    return rpc("list_unseen_certified_ratings").then(function (data) {
+      cache.unseen = asList(data);
+      return cache.unseen;
+    }).catch(function () {
+      cache.unseen = [];
+      return [];
+    });
+  }
+
+  function paintRatedBanner() {
+    var n = (cache.unseen || []).length;
+    var show = n > 0 && hooks.hasCard && hooks.hasCard();
+    ["rated-home-banner", "rated-card-banner"].forEach(function (id) {
+      var el = $(id);
+      if (el) el.classList.toggle("hidden", !show);
+    });
+  }
+
+  function dismissRatedBanner() {
+    return rpc("mark_certified_ratings_seen").then(function () {
+      cache.unseen = [];
+      paintRatedBanner();
+    }).catch(function () {});
+  }
+
   function refresh() {
-    var tasks = [loadMine()];
+    var tasks = [loadMine(), loadUnseenRatings()];
     if (hooks.isRater()) tasks.push(loadInbox());
     return Promise.all(tasks).then(function () {
       renderMine($("req-mine"));
       renderMine($("req-mine-home"));
       renderInbox($("req-inbox"));
       var count = pendingCount(cache.inbox);
-      var badge = $("home-req-count");
-      if (badge) {
-        badge.textContent = count ? String(count) : "";
-        badge.classList.toggle("hidden", !count);
-      }
+      paintPendingBadges(count);
+      paintRatedBanner();
       return cache;
     }).catch(function (err) {
       console.warn("rating requests", err);
@@ -303,6 +445,32 @@
     if ($("req-ask-home-btn")) $("req-ask-home-btn").addEventListener("click", openPicker);
     if ($("req-picker-cancel")) $("req-picker-cancel").addEventListener("click", closePicker);
     if ($("req-picker-send")) $("req-picker-send").addEventListener("click", submitPicker);
+
+    if ($("req-home-banner")) $("req-home-banner").addEventListener("click", function (ev) {
+      ev.preventDefault();
+      var box = $("req-inbox");
+      if (box) {
+        box.classList.remove("hidden");
+        box.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+    if ($("req-top-badge")) $("req-top-badge").addEventListener("click", function (ev) {
+      ev.preventDefault();
+      if (location.hash !== "#/" && location.hash !== "#/home") {
+        if (hooks.go) hooks.go("home");
+      }
+      setTimeout(function () {
+        var box = $("req-inbox");
+        if (box) {
+          box.classList.remove("hidden");
+          box.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 50);
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") refresh();
+    });
+    window.addEventListener("focus", function () { refresh(); });
     var sheet = $("req-picker");
     if (sheet) sheet.addEventListener("click", function (ev) { if (ev.target === sheet) closePicker(); });
     document.addEventListener("click", function (ev) {
@@ -321,11 +489,30 @@
       if (!id) return;
       if (act === "cancel") {
         cancel(id).catch(function (err) { hooks.showToast(hebrewError(err)); });
-      } else if (act === "decline") {
-        decline(id).catch(function (err) { hooks.showToast(hebrewError(err)); });
       } else if (act === "rate") {
         hooks.onOpenRate(id);
       }
+    });
+    document.addEventListener("click", function (ev) {
+      var resend = ev.target && ev.target.closest && ev.target.closest("[data-req-resend]");
+      if (resend) {
+        ev.preventDefault();
+        resendRequestEmail(resend.getAttribute("data-req-resend"), resend);
+        return;
+      }
+      if (ev.target && ev.target.id === "req-picker-result-close") {
+        ev.preventDefault();
+        closePicker();
+      }
+    });
+    ["rated-home-banner", "rated-card-banner"].forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      el.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        dismissRatedBanner();
+        if (hooks.go) hooks.go("card");
+      });
     });
   }
 
@@ -340,6 +527,7 @@
     openPicker: openPicker,
     closePicker: closePicker,
     notify: notify,
+    notifyPlayerRated: notifyPlayerRated,
     loadMine: loadMine,
     loadInbox: loadInbox,
     hebrewError: hebrewError,

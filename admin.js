@@ -46,7 +46,7 @@
     if (/cannot change an admin|cannot delete an admin/.test(m)) return "אי אפשר לשנות חשבון מנהל.";
     if (/email confirmation/.test(m)) return "כתובת האימייל שהוקלדה אינה תואמת.";
     if (/user not found/.test(m)) return "המשתמש לא נמצא.";
-    if (/not a certified rater/.test(m)) return "רק מוסמך פעיל יכול לתת דירוג כוכב.";
+    if (/not a certified rater/.test(m)) return "רק מוסמך פעיל יכול לתת דירוג מוסמך.";
     if (/email already in use/.test(m)) return "כתובת האימייל כבר משויכת למוסמך אחר.";
     if (/invalid email/.test(m)) return "כתובת האימייל אינה תקינה.";
     if (/invalid name/.test(m)) return "יש להזין שם מלא.";

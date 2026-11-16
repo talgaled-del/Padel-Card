@@ -1,4 +1,4 @@
-/* Certified star ratings (דירוג כוכב). Public read + rater writes go through RPCs. */
+/* Certified ratings (דירוג מוסמך). Public read + rater writes go through RPCs. */
 (function () {
   var LEVELS = ["D2", "D1", "C2", "C1", "B2", "B1", "A2", "A1"];
   var cache = {};
@@ -40,7 +40,7 @@
   function hebrewError(err) {
     var msg = (err && (err.message || err.error_description || err.details)) || "";
     var low = String(msg).toLowerCase();
-    if (/not a certified rater/.test(low)) return "רק מוסמך פעיל יכול לתת דירוג כוכב.";
+    if (/not a certified rater/.test(low)) return "רק מוסמך פעיל יכול לתת דירוג מוסמך.";
     if (/cannot rate own card/.test(low)) return "אי אפשר לדרג את הכרטיס של עצמכם.";
     if (/card unavailable/.test(low)) return "הכרטיס אינו זמין לדירוג.";
     if (/invalid level/.test(low)) return "בחרו רמה מהסולם הישראלי.";
@@ -167,7 +167,7 @@
       '<div class="ut-star' + (opts.compact ? " compact" : "") + '">' +
         '<button type="button" class="ut-star-line" aria-expanded="false">' +
           '<span class="ut-star-main">' +
-            '<span class="ut-star-label"><span class="ut-star-ico" aria-hidden="true">⭐</span>דירוג מוסמך</span>' +
+            '<span class="ut-star-label">דירוג מוסמך</span>' +
             '<span class="ut-star-meta">' + meta + "</span>" +
           "</span>" +
           '<strong class="ut-star-value" dir="ltr">' + escapeHtml(sum.level) + "</strong>" +
@@ -188,50 +188,31 @@
     var label = sum.count === 1 ? "מוסמך" : (sum.count + " מוסמכים");
     return '<div class="ut-star-badge" title="דירוג מוסמך">' +
       '<b dir="ltr">' + escapeHtml(sum.level) + "</b>" +
-      '<span>⭐ ' + escapeHtml(label) + "</span>" +
+      '<span>' + escapeHtml(label) + "</span>" +
     "</div>";
   }
 
-  function patchCard(art, ratings) {
+  function patchCard(art, ratings, card) {
     if (!art) return;
+    if (hooks.patchRatings && card) {
+      hooks.patchRatings(art, card, ratings);
+      return;
+    }
     var slot = art.querySelector(".ut-star-slot");
     var html = rowHtml(ratings);
     if (slot) slot.outerHTML = html;
-    var existing = art.querySelector(".ut-star-badge");
-    var star = heroBadgeHtml(ratings);
-    var badges = art.querySelector(".ut-hero-badges");
-    var hero = art.querySelector(".ut-hero-content");
-    if (star) {
-      if (existing) existing.outerHTML = star;
-      else if (badges) badges.insertAdjacentHTML("beforeend", star);
-      else if (hero) {
-        var main = hero.querySelector(".ut-badge");
-        if (main) {
-          var wrap = document.createElement("div");
-          wrap.className = "ut-hero-badges";
-          main.parentNode.insertBefore(wrap, main);
-          wrap.appendChild(main);
-          wrap.insertAdjacentHTML("beforeend", star);
-        }
-      }
-    } else if (existing) {
-      existing.remove();
-      if (badges && !badges.querySelector(".ut-star-badge") && badges.childElementCount === 1) {
-        var only = badges.firstElementChild;
-        badges.replaceWith(only);
-      }
-    }
   }
 
   function hydrateCard(art, card) {
     var id = hooks.cardId(card);
     if (!art || !id) return Promise.resolve([]);
     if (cache[id]) {
-      patchCard(art, cache[id]);
+      patchCard(art, cache[id], card);
       return Promise.resolve(cache[id]);
     }
     return fetchRatings(id).then(function (list) {
-      patchCard(art, list);
+      patchCard(art, list, card);
+      if (hooks.onRatingsLoaded) hooks.onRatingsLoaded(card, list);
       return list;
     });
   }
@@ -256,11 +237,12 @@
   }
 
   function fillLevels(selected) {
-    var box = $("certified-levels");
+    var box = $("certified-level-select");
     if (!box) return;
-    box.innerHTML = LEVELS.map(function (id) {
-      return '<button type="button" class="certified-level' + (id === selected ? " is-on" : "") + '" data-level="' + id + '" dir="ltr">' + id + "</button>";
+    box.innerHTML = '<option value="">בחרו רמה</option>' + LEVELS.map(function (id) {
+      return '<option value="' + id + '" dir="ltr"' + (id === selected ? " selected" : "") + ">" + id + "</option>";
     }).join("");
+    sheetLevel = selected || "";
   }
 
   function closeSheet() {
@@ -281,17 +263,17 @@
     $("certified-note").value = mine && mine.note ? mine.note : "";
     fillLevels(sheetLevel);
     var save = $("certified-sheet-save");
-    if (save) save.textContent = mine ? "עדכון הדירוג" : "שמירת דירוג";
-    var rm = $("certified-sheet-remove");
-    if (rm) rm.classList.toggle("hidden", !mine);
+    if (save) save.textContent = "אשר";
     var title = $("certified-sheet-title");
-    if (title) title.textContent = mine ? "עדכון דירוג מוסמך ⭐" : "דירוג מוסמך ⭐";
+    if (title) title.textContent = mine ? "עדכון דירוג מוסמך" : "דירוג מוסמך";
     $("certified-sheet").classList.remove("hidden");
   }
 
   function saveSheet() {
     if (!sheetCard) return;
     var id = hooks.cardId(sheetCard);
+    var sel = $("certified-level-select");
+    if (sel) sheetLevel = sel.value || sheetLevel;
     if (!sheetLevel) {
       hooks.showToast("בחרו רמה כדי לשמור");
       return;
@@ -299,14 +281,16 @@
     var note = ($("certified-note") && $("certified-note").value) || "";
     var btn = $("certified-sheet-save");
     if (btn) btn.disabled = true;
+    var saved = null;
     rpc("upsert_certified_rating", { p_card_id: id, p_level: sheetLevel, p_note: note })
-      .then(function () {
+      .then(function (row) {
+        saved = row;
         return fetchRatings(id);
       })
       .then(function () {
         closeSheet();
         hooks.showToast("הדירוג המוסמך נשמר");
-        hooks.onChanged(id);
+        hooks.onChanged(id, saved);
       })
       .catch(function (err) {
         hooks.showToast(hebrewError(err));
@@ -334,12 +318,7 @@
 
   function bind() {
     document.addEventListener("click", function (ev) {
-      var lvl = ev.target && ev.target.closest && ev.target.closest("#certified-levels .certified-level");
-      if (lvl) {
-        sheetLevel = lvl.getAttribute("data-level") || "";
-        fillLevels(sheetLevel);
-        return;
-      }
+      /* level is chosen from #certified-level-select */
       var line = ev.target && ev.target.closest && ev.target.closest(".ut-star-line");
       if (line) {
         var wrap = line.closest(".ut-star");
@@ -358,9 +337,9 @@
         window.__padelOpenCertifiedSheet(rate.getAttribute("data-cert-rate"));
       }
     });
-    if ($("certified-sheet-cancel")) $("certified-sheet-cancel").addEventListener("click", closeSheet);
     if ($("certified-sheet-save")) $("certified-sheet-save").addEventListener("click", saveSheet);
-    if ($("certified-sheet-remove")) $("certified-sheet-remove").addEventListener("click", removeMine);
+    var sel = $("certified-level-select");
+    if (sel) sel.addEventListener("change", function () { sheetLevel = sel.value || ""; });
     var sheet = $("certified-sheet");
     if (sheet) sheet.addEventListener("click", function (ev) { if (ev.target === sheet) closeSheet(); });
   }

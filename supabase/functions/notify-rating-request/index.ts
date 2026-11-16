@@ -76,6 +76,22 @@ function brandedEmail(opts: {
 </html>`;
 }
 
+async function recordEmail(
+  supabase: ReturnType<typeof createClient>,
+  requestId: string | null,
+  status: "sent" | "failed" | "skipped",
+) {
+  if (!requestId) return;
+  try {
+    await supabase.rpc("record_rating_request_email", {
+      p_request_id: requestId,
+      p_status: status,
+    });
+  } catch {
+    // Recording is best-effort; never fail the mail response on it.
+  }
+}
+
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get("origin");
   if (req.method === "OPTIONS") {
@@ -90,18 +106,20 @@ Deno.serve(async (req: Request) => {
     return json({ error: "not authorized" }, 401, origin);
   }
 
-  let body: { request_id?: string; kind?: string } = {};
+  let body: { request_id?: string; card_id?: string; kind?: string } = {};
   try {
     body = await req.json();
   } catch {
     return json({ error: "invalid json" }, 400, origin);
   }
   const requestId = String(body.request_id || "").trim();
+  const cardId = String(body.card_id || "").trim();
   const kind = String(body.kind || "new");
-  if (!requestId) return json({ error: "missing request_id" }, 400, origin);
-  if (!["new", "done", "declined"].includes(kind)) {
+  if (!["new", "done", "declined", "rated"].includes(kind)) {
     return json({ error: "invalid kind" }, 400, origin);
   }
+  if (kind === "rated" && !cardId) return json({ error: "missing card_id" }, 400, origin);
+  if (kind !== "rated" && !requestId) return json({ error: "missing request_id" }, 400, origin);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
   const supabaseAnon = Deno.env.get("SUPABASE_ANON_KEY") || "";
@@ -113,71 +131,91 @@ Deno.serve(async (req: Request) => {
   const supabase = createClient(supabaseUrl, supabaseAnon, {
     global: { headers: { Authorization: auth } },
   });
-  const { data, error } = await supabase.rpc("get_rating_request_notify_payload", {
-    p_id: requestId,
-  });
-  if (error) {
-    const status = /not authorized/i.test(error.message || "") ? 403 : 400;
-    return json({ error: error.message || "lookup failed" }, status, origin);
-  }
-  const row = data as {
-    id: string;
-    status: string;
+
+  let row: {
+    id?: string;
+    status?: string;
     message?: string | null;
     player_name?: string | null;
     player_level?: string | null;
     rater_name?: string | null;
     rater_email?: string | null;
     requester_email?: string | null;
+    card_id?: string;
   };
+
+  if (kind === "rated") {
+    const { data, error } = await supabase.rpc("get_certified_rating_notify_payload", {
+      p_card_id: cardId,
+    });
+    if (error) {
+      const status = /not authorized/i.test(error.message || "") ? 403 : 400;
+      return json({ error: error.message || "lookup failed" }, status, origin);
+    }
+    row = data as typeof row;
+  } else {
+    const { data, error } = await supabase.rpc("get_rating_request_notify_payload", {
+      p_id: requestId,
+    });
+    if (error) {
+      const status = /not authorized/i.test(error.message || "") ? 403 : 400;
+      return json({ error: error.message || "lookup failed" }, status, origin);
+    }
+    row = data as typeof row;
+  }
 
   const from = "Padel Card <login@padelcard.app>";
   const appUrl = "https://padelcard.app";
-  const rateUrl = `${appUrl}/#/rate/${row.id}`;
+  const rateUrl = row.id ? `${appUrl}/#/rate/${row.id}` : `${appUrl}/#/card`;
   const cardUrl = `${appUrl}/#/card`;
   const playerName = row.player_name || "שחקן";
+  const raterName = row.rater_name || "מוסמך";
   let to = "";
   let subject = "";
   let html = "";
 
   if (kind === "new") {
     to = row.rater_email || "";
-    subject = `${playerName} מבקש ממך דירוג כוכב`;
+    subject = `${playerName} מבקש ממך דירוג מוסמך`;
     html = brandedEmail({
-      title: `${playerName} מבקש ממך דירוג כוכב`,
+      title: `${playerName} מבקש ממך דירוג מוסמך`,
       lead: `${playerName} ביקש שתדרגו את הרמה שלו בכרטיס שחקן פאדל` +
         (row.player_level ? ` (רמה נוכחית לפי השאלון: ${row.player_level})` : "") + ".",
       message: row.message || null,
-      ctaLabel: "לדירוג הכרטיס ⭐",
+      ctaLabel: "לדירוג הכרטיס",
       ctaUrl: rateUrl,
       foot: "התקבלה בקשת דירוג מוסמך ב־Padel Card. אם לא ציפיתם למייל הזה, אפשר להתעלם ממנו.",
     });
-  } else if (kind === "done") {
+  } else if (kind === "done" || kind === "rated") {
     to = row.requester_email || "";
-    subject = `${row.rater_name || "מוסמך"} דירג את הכרטיס שלכם`;
+    subject = `${raterName} דירג אותך`;
     html = brandedEmail({
-      title: "הכרטיס שלכם קיבל דירוג כוכב",
-      lead: `${row.rater_name || "המוסמך"} דירג את הכרטיס שלכם. הדירוג מופיע עכשיו בכרטיס.`,
+      title: `${raterName} דירג אותך`,
+      lead: `${raterName} דירג את הכרטיס שלכם. הדירוג המוסמך מופיע עכשיו בכרטיס.`,
       ctaLabel: "לצפייה בכרטיס",
       ctaUrl: cardUrl,
       foot: "הודעה אוטומטית מ־Padel Card.",
     });
   } else {
     to = row.requester_email || "";
-    subject = `${row.rater_name || "מוסמך"} דחה את בקשת הדירוג`;
+    subject = `${raterName} דחה את בקשת הדירוג`;
     html = brandedEmail({
       title: "בקשת הדירוג נדחתה",
-      lead: `${row.rater_name || "המוסמך"} דחה את בקשת דירוג הכוכב. אפשר לבקש ממוסמך אחר.`,
+      lead: `${raterName} דחה את בקשת הדירוג המוסמך. אפשר לבקש ממוסמך אחר.`,
       ctaLabel: "לכרטיס שלי",
       ctaUrl: cardUrl,
       foot: "הודעה אוטומטית מ־Padel Card.",
     });
   }
 
+  const trackId = kind === "rated" ? "" : requestId;
+
   if (skipAddress(to)) {
+    await recordEmail(supabase, trackId || null, "skipped");
     return json({ ok: true, skipped: true, reason: "test_or_empty_address" }, 200, origin);
   }
   if (!resendKey) {
+    await recordEmail(supabase, trackId || null, "failed");
     return json({ error: "mail not configured", skipped: true }, 200, origin);
   }
 
@@ -196,7 +234,9 @@ Deno.serve(async (req: Request) => {
   });
   const sendBody = await sendRes.json().catch(() => ({}));
   if (!sendRes.ok) {
+    await recordEmail(supabase, trackId || null, "failed");
     return json({ error: "send failed", status: sendRes.status }, 502, origin);
   }
-  return json({ ok: true, id: sendBody && sendBody.id }, 200, origin);
+  await recordEmail(supabase, trackId || null, "sent");
+  return json({ ok: true, id: sendBody && (sendBody as { id?: string }).id }, 200, origin);
 });

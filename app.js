@@ -148,12 +148,26 @@
     }
   }
 
+
+  function payloadBoundToOther(data) {
+    if (!isLoggedIn() || !data) return false;
+    var profile = data.profile || {};
+    var auth = data.auth || {};
+    var boundId = profile.authUserId || auth.userId || "";
+    var boundEm = String(profile.authEmail || auth.email || "").toLowerCase();
+    var uid = state.auth && state.auth.userId;
+    var em = String((state.auth && state.auth.email) || "").toLowerCase();
+    if (boundId && uid && boundId !== uid) return true;
+    if (boundEm && em && boundEm !== em) return true;
+    return false;
+  }
+
   function payloadFromState() {
     if (state.profile) {
       state.profile.photo = state.photo || null;
       state.profile.partnerId = state.partnerId || null;
     }
-    if (state.profile && state.auth) {
+    if (state.profile && state.auth && !payloadBoundToOther({ profile: state.profile })) {
       state.profile.authUserId = state.auth.userId;
       state.profile.authEmail = state.auth.email;
     }
@@ -220,10 +234,19 @@
     cloudSaveTimer = setTimeout(function () { upsertCloudCard(payload); }, CLOUD_SAVE_MS);
   }
 
+  function upsertErrorIsForeignCard(err) {
+    var msg = String((err && (err.message || err.code || err)) || "");
+    return /already owned|cards_card_id_unique|duplicate key/i.test(msg);
+  }
+
   function upsertCloudCard(payload) {
     var client = getAuthClient();
     var userId = state.auth && state.auth.userId;
     if (!client || !userId) return Promise.resolve();
+    if (payloadBoundToOther(payload)) {
+      console.warn("cloud upsert refused: card bound to another account");
+      return Promise.resolve();
+    }
     var card = {
       levelId: payload.levelId,
       profile: payload.profile,
@@ -237,12 +260,16 @@
     }).then(function (res) {
       if (res && res.error) {
         console.warn("cloud upsert", res.error);
-        showToast("השמירה לענן נכשלה. הכרטיס נשמר במכשיר.");
+        showToast(upsertErrorIsForeignCard(res.error)
+          ? "הכרטיס הזה כבר שייך לחשבון אחר, ולכן לא נשמר כאן."
+          : "השמירה לענן נכשלה. הכרטיס נשמר במכשיר.");
       }
       return res;
     }).catch(function (err) {
       console.warn("cloud upsert", err);
-      showToast("השמירה לענן נכשלה. הכרטיס נשמר במכשיר.");
+      showToast(upsertErrorIsForeignCard(err)
+        ? "הכרטיס הזה כבר שייך לחשבון אחר, ולכן לא נשמר כאן."
+        : "השמירה לענן נכשלה. הכרטיס נשמר במכשיר.");
     });
   }
 
@@ -275,13 +302,8 @@
   }
 
   function localBelongsToSomeoneElse(data) {
-    if (!isLoggedIn() || !hasCardPayload(data)) return false;
-    var owner = localPayloadOwner(data);
-    var uid = state.auth.userId;
-    var em = String(state.auth.email || "").toLowerCase();
-    if (owner.userId && uid && owner.userId !== uid) return true;
-    if (owner.email && em && owner.email !== em) return true;
-    return false;
+    if (!hasCardPayload(data)) return false;
+    return payloadBoundToOther(data);
   }
 
   function stampLocalCardForSignOut() {
@@ -1054,7 +1076,15 @@
 
   function renderHome() {
     var hasCard = !!(state.profile && state.levelId);
-    $("home-cta-label").textContent = hasCard ? "קביעת רמה מחדש" : "קביעת רמה והקמת כרטיס";
+    var signed = isLoggedIn();
+    var cta = $("home-cta-label");
+    if (cta) {
+      cta.textContent = signed && !hasCard
+        ? "צור כרטיס חדש"
+        : (hasCard ? "קביעת רמה מחדש" : "קביעת רמה והקמת כרטיס");
+    }
+    var empty = $("home-empty-card");
+    if (empty) empty.classList.toggle("hidden", !(signed && !hasCard));
     $("home-card-btn").classList.toggle("hidden", !hasCard);
     if ($("req-ask-home-btn")) $("req-ask-home-btn").classList.toggle("hidden", !hasCard);
     if ($("home-admin-btn")) $("home-admin-btn").classList.toggle("hidden", !state.isAdmin);
@@ -2828,8 +2858,7 @@
     var aiOverall = overallAiForCard(card);
     var certId = shareCardId(card);
     var certRatings = (window.PadelCertified && certId && PadelCertified.cached(certId)) || [];
-    var certRow = window.PadelCertified ? PadelCertified.rowHtml(certRatings, { compact: !!opts.compact }) : "";
-    var ratingLine = certRow + ratingLineHtml(level) + aiRatingHtml(aiOverall, opts, card);
+    var ratingLine = ratingsBlockHtml(level, aiOverall, certRatings, { compact: !!opts.compact, card: card });
     if (opts.allowReupload && !opts.compact) vidHtml += aiCtaHtml(card);
 
     art.innerHTML =
@@ -2856,7 +2885,7 @@
       var rateBtn = document.createElement("button");
       rateBtn.type = "button";
       rateBtn.className = "btn btn-star";
-      rateBtn.textContent = "דרג כמוסמך ⭐";
+      rateBtn.textContent = "דרג כמוסמך";
       rateBtn.addEventListener("click", function () { PadelCertified.openSheet(card); });
       rateWrap.appendChild(rateBtn);
       var body = art.querySelector(".ut-body");
@@ -2888,11 +2917,82 @@
     return (level.id || "") + " · " + (level.numeric || "");
   }
 
+  function levelScaleIndex(id) {
+    if (!id || !PadelQuiz || !PadelQuiz.LEVELS) return -1;
+    for (var i = 0; i < PadelQuiz.LEVELS.length; i++) {
+      if (PadelQuiz.LEVELS[i].id === id) return i;
+    }
+    return -1;
+  }
+
+  function computeWeightedLevel(quizId, ai, ratings) {
+    var parts = [];
+    var q = levelScaleIndex(quizId);
+    if (q >= 0) parts.push({ i: q, w: 0.20 });
+    var a = ai && levelScaleIndex(ai.l);
+    if (a >= 0) parts.push({ i: a, w: 0.30 });
+    var cert = window.PadelCertified && PadelCertified.summarize ? PadelCertified.summarize(ratings || []) : null;
+    var c = cert && levelScaleIndex(cert.level);
+    if (c >= 0) parts.push({ i: c, w: 0.50 });
+    if (!parts.length) return null;
+    var wsum = 0;
+    var mean = 0;
+    for (var i = 0; i < parts.length; i++) {
+      wsum += parts[i].w;
+      mean += parts[i].i * parts[i].w;
+    }
+    var rounded = Math.round(mean / wsum);
+    var L = PadelQuiz.LEVELS;
+    if (rounded < 0) rounded = 0;
+    if (rounded >= L.length) rounded = L.length - 1;
+    return L[rounded];
+  }
+
+  function weightedRowHtml(level, ai, ratings) {
+    var w = computeWeightedLevel(level && level.id, ai, ratings);
+    if (!w) return "";
+    var tip = "הדירוג המשוקלל הוא ממוצע משוקלל על סולם הרמות: דירוג מוסמך 50%, דירוג AI 30%, ודירוג שאלון 20%. המשקלים מנורמלים לפי הדירוגים שקיימים, והתוצאה מעוגלת לרמה הקרובה.";
+    return '<div class="ut-weighted">' +
+      '<div class="ut-weighted-main">' +
+        '<span class="ut-weighted-label">דירוג משוקלל' +
+          '<button type="button" class="ut-weight-info" aria-label="הסבר על הדירוג המשוקלל" aria-expanded="false">i</button>' +
+        "</span>" +
+        '<p class="ut-weight-tip">' + escapeHtml(tip) + "</p>" +
+      "</div>" +
+      '<strong class="ut-weighted-value" dir="ltr">' + escapeHtml(w.id) + "</strong>" +
+    "</div>";
+  }
+
+  function ratingsBlockHtml(level, ai, certRatings, opts) {
+    var certRow = window.PadelCertified ? PadelCertified.rowHtml(certRatings, { compact: !!(opts && opts.compact) }) : "";
+    return '<div class="ut-ratings-block">' +
+      ratingLineHtml(level) +
+      aiRatingHtml(ai, opts, opts && opts.card) +
+      certRow +
+      weightedRowHtml(level, ai, certRatings) +
+    "</div>";
+  }
+
+  function patchCardRatings(art, card, ratings) {
+    if (!art || !card) return;
+    var p = card.profile || {};
+    var level = PadelQuiz.levelById(card.levelId) || { id: card.levelId, title: "", numeric: "" };
+    var ai = overallAiForCard(card);
+    var block = art.querySelector(".ut-ratings-block");
+    var html = ratingsBlockHtml(level, ai, ratings || [], { compact: art.classList.contains("compact"), card: card });
+    if (block) block.outerHTML = html;
+    var hero = art.querySelector(".ut-hero-content");
+    if (hero) {
+      var badge = hero.querySelector(".ut-hero-badges") || hero.querySelector(".ut-badge");
+      if (badge) badge.outerHTML = heroBadgeHtml(level, ai, ratings || []);
+    }
+  }
+
   function ratingLineHtml(level) {
     var text = ratingText(level);
     if (!text || text === " · ") return "";
     return '<div class="ut-rating-line">' +
-      '<span class="ut-rating-label">רמה לפי השאלון</span>' +
+      '<span class="ut-rating-label">דירוג שאלון</span>' +
       '<strong class="ut-rating-value" dir="ltr">' + escapeHtml(text) + "</strong>" +
       "</div>";
   }
@@ -3268,7 +3368,7 @@
     return '<div class="ut-ai' + (opts && opts.compact ? " compact" : "") + '">' +
       '<button type="button" class="ut-ai-line" aria-expanded="false">' +
         '<span class="ut-ai-main">' +
-          '<span class="ut-ai-label"><span class="ut-ai-spark" aria-hidden="true">✦</span>AI Rating</span>' +
+          '<span class="ut-ai-label"><span class="ut-ai-spark" aria-hidden="true">✦</span>דירוג AI</span>' +
           '<span class="ut-ai-meta"><span class="ai-conf conf-' + conf.key + '">' + conf.label + "</span>" +
           '<span class="ai-count">' + aiVideosText(ai.n) + "</span></span>" +
         "</span>" +
@@ -3549,20 +3649,13 @@
   }
 
   function heroBadgesWrapHtml(level, ai, lr, ratings) {
-    var main = heroBadgeHtml(level, ai, lr);
-    var star = window.PadelCertified ? PadelCertified.heroBadgeHtml(ratings || []) : "";
-    if (!star) return main;
-    return '<div class="ut-hero-badges">' + main + star + "</div>";
+    return heroBadgeHtml(level, ai, ratings);
   }
 
-  function heroBadgeHtml(level, ai, lr) {
-    var info = levelBadgeInfo(level.id, ai, lr);
-    if (info.kind === "range" || info.kind === "accepted") {
-      var L = PadelQuiz.LEVELS;
-      return '<div class="' + badgeClass(L[info.lo].id) + ' is-range" title="טווח לפי השאלון וה-AI"><b dir="ltr">' +
-        escapeHtml(L[info.lo].id) + '<i>-</i>' + escapeHtml(L[info.hi].id) + "</b><span>שאלון + AI</span></div>";
-    }
-    return '<div class="' + badgeClass(level.id) + '"><b>' + escapeHtml(level.id) + "</b><span>" + escapeHtml(level.title) + "</span></div>";
+  function heroBadgeHtml(level, ai, ratings) {
+    var w = computeWeightedLevel(level && level.id, ai, ratings) || level || { id: "", title: "" };
+    return '<div class="' + badgeClass(w.id) + '" title="דירוג משוקלל"><b>' + escapeHtml(w.id) + "</b><span>" +
+      escapeHtml(w.title || "משוקלל") + "</span></div>";
   }
 
   // Wrap level ids (e.g. "C2-C1", "B2") so they don't flip punctuation in RTL text.
@@ -3588,6 +3681,7 @@
 
   // Called after a fresh AI result. Asks only when AI is 2+ steps from the quiz and this exact pair wasn't decided yet.
   function maybeAskLevelRange() {
+    return;
     var card = viewedCardForAi();
     if (!card || !viewerOwnsViewedCard()) return;
     var ai = overallAiForCard(card);
@@ -4464,18 +4558,36 @@
     window.addEventListener("orientationchange", onViewport);
     if (window.visualViewport) window.visualViewport.addEventListener("resize", onViewport);
     window.addEventListener("hashchange", render);
+    document.addEventListener("click", function (ev) {
+      var info = ev.target && ev.target.closest && ev.target.closest(".ut-weight-info");
+      if (info) {
+        ev.preventDefault();
+        var row = info.closest(".ut-weighted");
+        if (row) {
+          var open = !row.classList.contains("is-open");
+          row.classList.toggle("is-open", open);
+          info.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+      }
+    });
   }
 
   function applyAuthUser(user, meta) {
     var source = (meta && meta.source) || "update";
     if (user && user.id) {
       var sameUser = state.auth && state.auth.userId === user.id;
+      if (!sameUser) {
+        clearTimeout(cloudSaveTimer);
+        accountSync = null;
+        state.cloudSynced = false;
+        if (state.profile) clearOwnerFromView();
+      }
       state.auth = {
         userId: user.id,
         email: user.email || "",
         provider: user.provider || "email"
       };
-      if (state.profile) {
+      if (sameUser && state.profile && !payloadBoundToOther({ profile: state.profile })) {
         state.profile.authUserId = state.auth.userId;
         state.profile.authEmail = state.auth.email;
       }
@@ -4621,6 +4733,11 @@
     PadelCertified.init({
       showToast: showToast,
       cardId: shareCardId,
+      patchRatings: patchCardRatings,
+      onRatingsLoaded: function () {
+        if (state.view === "card" || state.view === "rate") renderCard();
+        else if (state.view === "pair") renderPair();
+      },
       viewer: function () {
         return {
           isRater: !!state.isCertifiedRater,
@@ -4628,12 +4745,9 @@
           ownCardId: ownCardId()
         };
       },
-      onChanged: function (cardId) {
-        if (window.PadelRequests && PadelRequests.cached) {
-          var inbox = (PadelRequests.cached().inbox || []).filter(function (r) {
-            return r.status === "pending" && r.card_id === cardId;
-          });
-          if (inbox.length && inbox[0].id) PadelRequests.notify(inbox[0].id, "done");
+      onChanged: function (cardId, saved) {
+        if (window.PadelRequests && PadelRequests.notifyPlayerRated) {
+          PadelRequests.notifyPlayerRated(cardId, saved);
         }
         if (window.PadelRequests) PadelRequests.refresh();
         if (state.view === "card" || state.view === "rate") renderCard();
