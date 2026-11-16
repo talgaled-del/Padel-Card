@@ -53,7 +53,13 @@
     shareMode: "single",
     auth: null,
     authReady: false,
-    cloudSynced: false
+    cloudSynced: false,
+    isAdmin: false,
+    disabledNotice: false,
+    disabledCardIds: null,
+    disabledLoaded: false,
+    adminPreview: false,
+    adminViewUserId: null
   };
 
   const $ = function (id) { return document.getElementById(id); };
@@ -624,6 +630,31 @@
   function parseRoute() {
     var hash = (location.hash || "#/").replace(/^#/, "");
     var parts = hash.split("/").filter(Boolean);
+
+    if (parts[0] === "admin") {
+      if (parts[1] === "view" && parts[2]) {
+        state.adminViewUserId = parts[2];
+        state.publicPair = null;
+        if (!(state.adminPreview && state.publicCard && state.adminPreviewId === parts[2])) {
+          state.publicCard = null;
+        }
+        state.view = "admin-view";
+        gateAdminView();
+        return;
+      }
+      state.adminPreview = false;
+      state.adminViewUserId = null;
+      state.adminPreviewId = null;
+      state.publicCard = null;
+      state.publicPair = null;
+      state.view = "admin";
+      gateAdminView();
+      return;
+    }
+
+    state.adminPreview = false;
+    state.adminViewUserId = null;
+    state.adminPreviewId = null;
     state.publicCard = null;
     state.publicPair = null;
 
@@ -652,6 +683,7 @@
       try {
         state.publicCard = expandPlayer(JSON.parse(fromBase64Url(parts[1])));
         state.view = "card";
+        applyShareAvailability();
         return;
       } catch (err) {
         console.warn(err);
@@ -665,6 +697,7 @@
           var raw = JSON.parse(fromBase64Url(parts[1]));
           state.publicPair = { a: expandPlayer(raw.a), b: expandPlayer(raw.b) };
           state.view = "pair";
+          applyShareAvailability();
           return;
         } catch (err) {
           console.warn(err);
@@ -680,7 +713,7 @@
     }
 
     var route = parts[0] || "home";
-    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1 };
+    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1 };
     if (route === "result" && !state.levelId) { state.view = "quiz"; return; }
     if (route === "profile" && !state.levelId) { state.view = "quiz"; return; }
     if ((route === "card" || route === "share" || route === "pair") && (!state.profile || !state.levelId)) {
@@ -698,6 +731,10 @@
 
   function gateOwnerViews() {
     if (isVisitorView()) return;
+    if (state.view === "admin" || state.view === "admin-view") {
+      gateAdminView();
+      return;
+    }
     if (!state.authReady) {
       state.view = "boot";
       return;
@@ -705,8 +742,94 @@
     if (!isLoggedIn()) state.view = "login";
   }
 
+  function shareCardId(card) {
+    if (!card) return "";
+    return (card.profile && card.profile.id) || card.id || "";
+  }
+
+  function applyShareAvailability() {
+    if (!state.disabledLoaded) {
+      state.view = "boot";
+      return;
+    }
+    var ids = state.disabledCardIds || {};
+    var blocked = false;
+    if (state.publicCard && ids[shareCardId(state.publicCard)]) blocked = true;
+    if (state.publicPair) {
+      if (ids[shareCardId(state.publicPair.a)] || ids[shareCardId(state.publicPair.b)]) blocked = true;
+    }
+    if (blocked) {
+      state.view = "unavailable";
+      state.publicCard = null;
+      state.publicPair = null;
+    }
+  }
+
+  function gateAdminView() {
+    if (!state.authReady) {
+      state.view = "boot";
+      return;
+    }
+    if (!isLoggedIn()) {
+      state.view = "login";
+      return;
+    }
+    if (!state.isAdmin) {
+      state.view = "home";
+      state.adminPreview = false;
+      state.adminViewUserId = null;
+      return;
+    }
+  }
+
+  function cardFromCloudPayload(payload) {
+    if (!payload || !payload.profile) return null;
+    var profile = payload.profile;
+    return {
+      id: profile.id,
+      profile: profile,
+      levelId: payload.levelId,
+      score: PadelQuiz.totalScore(payload.answers || []),
+      photo: profile.photo || null,
+      videos: payload.videos || []
+    };
+  }
+
+  function refreshDisabledCards() {
+    var c = getAuthClient();
+    var done = function (ids) {
+      var set = {};
+      (ids || []).forEach(function (id) { if (id) set[id] = true; });
+      state.disabledCardIds = set;
+      state.disabledLoaded = true;
+    };
+    if (window.PadelAdmin && typeof PadelAdmin.listDisabledIds === "function") {
+      return PadelAdmin.listDisabledIds().then(done).catch(function () { done([]); });
+    }
+    if (!c) { done([]); return Promise.resolve(); }
+    return c.from("disabled_cards").select("card_id").then(function (res) {
+      done(((res && res.data) || []).map(function (r) { return r.card_id; }));
+    }).catch(function () { done([]); });
+  }
+
+  function loadAccountFlags() {
+    if (!isLoggedIn() || !window.PadelAdmin || typeof PadelAdmin.accountFlags !== "function") {
+      state.isAdmin = false;
+      return Promise.resolve({ is_admin: false, disabled: false });
+    }
+    return PadelAdmin.accountFlags().then(function (flags) {
+      flags = flags || {};
+      state.isAdmin = !!flags.is_admin;
+      return flags;
+    }).catch(function () {
+      state.isAdmin = false;
+      return { is_admin: false, disabled: false };
+    });
+  }
+
   function go(view) {
     if (view === "home") location.hash = "#/";
+    else if (view && view.charAt(0) === "#") location.hash = view;
     else location.hash = "#/" + view;
   }
 
@@ -842,6 +965,7 @@
     var hasCard = !!(state.profile && state.levelId);
     $("home-cta-label").textContent = hasCard ? "קביעת רמה מחדש" : "קביעת רמה והקמת כרטיס";
     $("home-card-btn").classList.toggle("hidden", !hasCard);
+    if ($("home-admin-btn")) $("home-admin-btn").classList.toggle("hidden", !state.isAdmin);
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
   }
 
@@ -3931,19 +4055,28 @@
 
   function render() {
     parseRoute();
-    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot"].forEach(function (name) {
+    var visual = state.view === "admin-view" ? "card" : state.view;
+    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot", "admin", "unavailable"].forEach(function (name) {
       var el = $("view-" + name);
-      if (el) el.classList.toggle("hidden", state.view !== name);
+      if (el) el.classList.toggle("hidden", visual !== name);
     });
+    if ($("admin-preview-bar")) $("admin-preview-bar").classList.toggle("hidden", !state.adminPreview || visual !== "card");
     if (state.view === "home") renderHome();
-    if (state.view === "login" && window.PadelAuth && PadelAuth.render) PadelAuth.render();
+    if (state.view === "login") {
+      if ($("auth-disabled-note")) $("auth-disabled-note").classList.toggle("hidden", !state.disabledNotice);
+      if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+    }
     if (state.view === "quiz") renderQuiz();
     if (state.view === "result") renderResult();
     if (state.view === "profile") fillProfileForm();
-    if (state.view === "card") renderCard();
+    if (state.view === "card" || state.view === "admin-view") {
+      if (state.view === "admin-view") openAdminCardPreview();
+      else renderCard();
+    }
     if (state.view === "pair") renderPair();
     if (state.view === "share") renderShare();
-    var showcase = state.view === "card" || state.view === "pair";
+    if (state.view === "admin" && window.PadelAdmin && PadelAdmin.render) PadelAdmin.render();
+    var showcase = visual === "card" || visual === "pair";
     document.body.classList.toggle("mode-showcase", showcase);
     document.body.classList.remove("has-dock");
     window.scrollTo(0, 0);
@@ -4161,22 +4294,42 @@
         return;
       }
       var finish = function () {
-        state.authReady = true;
-        if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
-        if (source === "sign-in") {
-          go(state.profile && state.levelId ? "card" : "home");
-        } else {
-          render();
-        }
+        loadAccountFlags().then(function (flags) {
+          if (flags && flags.disabled) {
+            state.disabledNotice = true;
+            state.authReady = true;
+            state.isAdmin = false;
+            if (window.PadelAuth && PadelAuth.signOut) {
+              showToast("החשבון אינו פעיל");
+              PadelAuth.signOut();
+            } else {
+              render();
+            }
+            return;
+          }
+          state.disabledNotice = false;
+          state.authReady = true;
+          if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+          var hash = (location.hash || "").replace(/^#\/?/, "");
+          var wantsAdmin = hash.indexOf("admin") === 0;
+          if (source === "sign-in") {
+            if (wantsAdmin && state.isAdmin) go("admin");
+            else go(state.profile && state.levelId ? "card" : "home");
+          } else {
+            render();
+          }
+        });
       };
       syncAccount().then(finish).catch(finish);
       return;
     }
     if (source === "sign-out") {
       state.auth = null;
+      state.isAdmin = false;
       clearOwnerFromView();
     } else {
       state.auth = null;
+      state.isAdmin = false;
     }
     state.authReady = true;
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
@@ -4184,7 +4337,51 @@
     else render();
   }
 
+  function openAdminCardPreview() {
+    var userId = state.adminViewUserId;
+    if (!userId || !window.PadelAdmin) { go("admin"); return; }
+    if (state.adminPreview && state.publicCard && state.adminPreviewId === userId) {
+      renderCard();
+      return;
+    }
+    if (state.adminLoadingId === userId) return;
+    state.adminLoadingId = userId;
+    state.adminPreview = true;
+    var root = $("card-root");
+    if (root) root.innerHTML = '<p class="lede">טוענים את הכרטיס…</p>';
+    if ($("admin-preview-bar")) $("admin-preview-bar").classList.remove("hidden");
+    PadelAdmin.getCard(userId).then(function (payload) {
+      state.adminLoadingId = null;
+      var card = cardFromCloudPayload(payload);
+      if (!card) {
+        showToast("לא נמצא כרטיס למשתמש הזה");
+        go("admin");
+        return;
+      }
+      if (state.adminViewUserId !== userId) return;
+      state.publicCard = card;
+      state.adminPreview = true;
+      state.adminPreviewId = userId;
+      renderCard();
+    }).catch(function (err) {
+      state.adminLoadingId = null;
+      showToast((window.PadelAdmin && PadelAdmin.hebrewError(err)) || "לא ניתן לטעון את הכרטיס");
+      go("admin");
+    });
+  }
+
   bind();
+  if (window.PadelAdmin) {
+    PadelAdmin.init({
+      go: go,
+      showToast: showToast,
+      regionLabel: function (id) { return (LABELS.region && LABELS.region[id]) || id || "—"; },
+      onViewCard: function (user) {
+        if (!user || !user.id) return;
+        go("admin/view/" + user.id);
+      }
+    });
+  }
   if (window.PadelAuth) {
     PadelAuth.init({
       onSession: applyAuthUser,
@@ -4196,5 +4393,6 @@
   } else {
     state.authReady = true;
   }
+  refreshDisabledCards().then(function () { render(); });
   render();
 })();

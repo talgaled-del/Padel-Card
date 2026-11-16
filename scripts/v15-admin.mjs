@@ -56,38 +56,52 @@ function errMsg(res, fallback) {
   return fallback + " HTTP " + (res && res.status);
 }
 
-export async function ensureTestUser() {
+export async function ensureUser(email) {
+  const addr = String(email || TEST_EMAIL).toLowerCase();
   const password = process.env.PADEL_TEST_PASSWORD || randomPassword();
   const created = await adminFetch("/auth/v1/admin/users", {
     method: "POST",
     body: JSON.stringify({
-      email: TEST_EMAIL,
+      email: addr,
       password: password,
       email_confirm: true,
-      user_metadata: { purpose: "v15-automated-test" }
+      user_metadata: { purpose: "padel-automated-test" }
     })
   });
   if (created.ok && created.body && created.body.id) {
-    return { id: created.body.id, email: TEST_EMAIL, password: password };
+    return { id: created.body.id, email: addr, password: password };
   }
   const listed = await adminFetch("/auth/v1/admin/users?page=1&per_page=200", { method: "GET" });
   if (!listed.ok) throw new Error("list users failed: " + errMsg(listed, "list"));
   const users = (listed.body && (listed.body.users || listed.body)) || [];
-  const existing = users.find((u) => u && String(u.email || "").toLowerCase() === TEST_EMAIL);
+  const existing = users.find((u) => u && String(u.email || "").toLowerCase() === addr);
   if (!existing) throw new Error("could not create or find test user: " + errMsg(created, "create"));
   const updated = await adminFetch("/auth/v1/admin/users/" + existing.id, {
     method: "PUT",
     body: JSON.stringify({ password: password, email_confirm: true })
   });
   if (!updated.ok) throw new Error("could not reset test user password: " + errMsg(updated, "update"));
-  return { id: existing.id, email: TEST_EMAIL, password: password };
+  return { id: existing.id, email: addr, password: password };
+}
+
+export async function ensureTestUser() {
+  return ensureUser(TEST_EMAIL);
 }
 
 export async function deleteTestUser(userId) {
   if (!userId) return;
   await adminFetch("/rest/v1/cards?user_id=eq." + encodeURIComponent(userId), { method: "DELETE" });
-  const res = await adminFetch("/auth/v1/admin/users/" + userId, { method: "DELETE" });
-  if (!res.ok && res.status !== 404) throw new Error("delete test user failed: " + errMsg(res, "delete"));
+  await adminFetch("/rest/v1/admin_actions?or=(target_user_id.eq." + userId + ",admin_id.eq." + userId + ")", { method: "DELETE" });
+  await adminFetch("/rest/v1/admins?user_id=eq." + userId, { method: "DELETE" });
+  await adminFetch("/auth/v1/admin/users/" + userId, {
+    method: "PUT",
+    body: JSON.stringify({ ban_duration: "none" })
+  });
+  let res = await adminFetch("/auth/v1/admin/users/" + userId, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    res = await adminFetch("/auth/v1/admin/users/" + userId, { method: "DELETE" });
+  }
+  if (!res.ok && res.status !== 404) throw new Error("delete test user failed: " + errMsg(res, "delete") + " HTTP " + res.status);
 }
 
 export async function deleteCard(userId) {
@@ -124,3 +138,49 @@ export const DEVICE = {
   locale: "he-IL",
   userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
 };
+
+
+export async function addAdmin(email, userId) {
+  const res = await adminFetch("/rest/v1/admins", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ email: String(email).toLowerCase(), user_id: userId || null })
+  });
+  if (!res.ok && res.status !== 409) throw new Error("addAdmin failed: " + errMsg(res, "add admin"));
+}
+
+export async function removeAdmin(email) {
+  const res = await adminFetch("/rest/v1/admins?email=eq." + encodeURIComponent(String(email).toLowerCase()), {
+    method: "DELETE"
+  });
+  if (!res.ok && res.status !== 404) throw new Error("removeAdmin failed: " + errMsg(res, "remove admin"));
+}
+
+export async function deleteDisabledCard(cardId) {
+  if (!cardId) return;
+  const res = await adminFetch("/rest/v1/disabled_cards?card_id=eq." + encodeURIComponent(cardId), { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error("delete disabled card failed: " + errMsg(res, "delete disabled"));
+}
+
+
+export async function listAuthUsers() {
+  const res = await adminFetch("/auth/v1/admin/users?page=1&per_page=200", { method: "GET" });
+  if (!res.ok) throw new Error("list users failed: " + errMsg(res, "list"));
+  const users = (res.body && (res.body.users || res.body)) || [];
+  return Array.isArray(users) ? users : [];
+}
+
+// Removes only disposable @example.com padel.test accounts. Never touches real users.
+export async function cleanupExampleTestUsers(pattern) {
+  const re = pattern instanceof RegExp ? pattern : /padel\.test\.v16/i;
+  const users = await listAuthUsers();
+  const matches = users.filter((u) => {
+    const email = String(u && u.email || "").toLowerCase();
+    return email.endsWith("@example.com") && re.test(email);
+  });
+  for (const u of matches) {
+    await removeAdmin(u.email).catch(function () {});
+    await deleteTestUser(u.id);
+  }
+  return matches.length;
+}

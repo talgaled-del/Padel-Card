@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v15/styles.css" />
-  <link rel="stylesheet" href="v15/cards.css" />
+  <link rel="stylesheet" href="v16/styles.css" />
+  <link rel="stylesheet" href="v16/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -48,6 +48,7 @@
           <span id="home-cta-label">קביעת רמה והקמת כרטיס</span>
         </button>
         <button class="btn btn-ghost hidden" id="home-card-btn" type="button" style="margin-top:10px">הכרטיס שלי</button>
+        <button class="btn btn-ghost hidden" id="home-admin-btn" type="button" style="margin-top:10px">ניהול משתמשים</button>
         <button class="btn btn-ghost" id="home-login-btn" type="button" style="margin-top:10px">התחברות</button>
         <div class="auth-status hidden" id="home-auth-status">
           <p>מחוברים כ־<strong id="home-auth-email" dir="ltr"></strong></p>
@@ -297,6 +298,7 @@
           <div class="auth-note hidden" id="auth-unconfigured" role="status">
             ההתחברות עדיין לא הוגדרה. אי אפשר ליצור כרטיס בלי חשבון.
           </div>
+          <p class="auth-error hidden" id="auth-disabled-note" role="status">החשבון אינו פעיל. אם זו טעות, פנו למנהל.</p>
           <p class="auth-error hidden" id="auth-error" role="alert"></p>
           <button class="btn btn-google" id="auth-google" type="button">
             <svg class="google-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -370,6 +372,72 @@
         </div>
       </div>
     </section>
+
+
+    <section id="view-admin" class="view hidden">
+      <div class="admin-console">
+        <header class="admin-head">
+          <p class="eyebrow">ניהול</p>
+          <h1>קונסולת מנהל</h1>
+          <p class="lede">מעקב אחרי משתמשים, כרטיסים ופעילות באתר.</p>
+        </header>
+        <div id="admin-stats" class="admin-stats" aria-label="סטטיסטיקה"></div>
+        <div class="admin-toolbar">
+          <div class="admin-toolbar-top">
+            <h2>משתמשים</h2>
+            <span id="admin-user-count" class="admin-muted"></span>
+          </div>
+          <input id="admin-search" type="search" placeholder="חיפוש לפי שם, אימייל או רמה" autocomplete="off" />
+          <div class="admin-toolbar-row">
+            <label class="admin-sort-label">מיון
+              <select id="admin-sort">
+                <option value="created_at_desc">חדשים קודם</option>
+                <option value="created_at_asc">ותיקים קודם</option>
+                <option value="last_sign_in_desc">כניסה אחרונה</option>
+                <option value="name_asc">שם</option>
+                <option value="email_asc">אימייל</option>
+                <option value="level_asc">רמה</option>
+              </select>
+            </label>
+            <button class="btn btn-ghost" id="admin-refresh" type="button">רענון</button>
+            <button class="btn btn-ghost" id="admin-export" type="button">ייצוא CSV</button>
+          </div>
+        </div>
+        <div id="admin-users" class="admin-users"></div>
+        <section class="admin-log" aria-labelledby="admin-log-title">
+          <h2 id="admin-log-title">יומן פעולות</h2>
+          <div id="admin-actions"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="view-unavailable" class="view hidden">
+      <div class="auth-card unavailable-card">
+        <h1>הכרטיס אינו זמין</h1>
+        <p class="lede">הכרטיס הזה לא זמין כרגע.</p>
+      </div>
+    </section>
+
+    <div id="admin-preview-bar" class="admin-preview-bar hidden">
+      <button class="btn btn-ghost" id="admin-preview-back" type="button">חזרה לניהול</button>
+      <span>צפייה בכרטיס · קריאה בלבד</span>
+    </div>
+
+    <div id="admin-dialog" class="admin-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="admin-dialog-title">
+      <div class="admin-dialog-card">
+        <h2 id="admin-dialog-title" class="admin-dialog-title"></h2>
+        <p id="admin-dialog-text" class="lede" style="text-align:center"></p>
+        <p id="admin-dialog-note" class="admin-dialog-note hidden" dir="ltr"></p>
+        <div class="field hidden" id="admin-dialog-field">
+          <label for="admin-dialog-email">כתובת האימייל לאישור</label>
+          <input id="admin-dialog-email" type="email" dir="ltr" autocomplete="off" />
+        </div>
+        <div class="btn-row two" style="margin-top:14px">
+          <button type="button" class="btn btn-ghost" id="admin-dialog-no">ביטול</button>
+          <button type="button" class="btn btn-primary" id="admin-dialog-yes">אישור</button>
+        </div>
+      </div>
+    </div>
 
     <section id="view-card" class="view hidden">
       <div id="card-root"></div>
@@ -490,12 +558,13 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
-  <script src="v15/config.js"></script>
+  <script src="v16/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
-  <script src="v15/quiz.js"></script>
-  <script src="v15/players.js"></script>
-  <script src="v15/track.js"></script>
-  <script src="v15/auth.js"></script>
-  <script src="v15/app.js"></script>
+  <script src="v16/quiz.js"></script>
+  <script src="v16/players.js"></script>
+  <script src="v16/track.js"></script>
+  <script src="v16/auth.js"></script>
+  <script src="v16/admin.js"></script>
+  <script src="v16/app.js"></script>
 </body>
 </html>
