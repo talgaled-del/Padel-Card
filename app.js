@@ -55,6 +55,8 @@
     authReady: false,
     cloudSynced: false,
     isAdmin: false,
+    isCertifiedRater: false,
+    certifiedRater: null,
     disabledNotice: false,
     disabledCardIds: null,
     disabledLoaded: false,
@@ -819,18 +821,38 @@
     }).catch(function () { done([]); });
   }
 
+  function clearCertifiedFlags() {
+    state.isCertifiedRater = false;
+    state.certifiedRater = null;
+  }
+
+  function applyCertifiedFlags(flags) {
+    flags = flags || {};
+    var rater = flags.certified_rater || null;
+    state.isCertifiedRater = !!(flags.is_certified_rater && rater && rater.id);
+    state.certifiedRater = state.isCertifiedRater ? rater : null;
+  }
+
+  function ownCardId() {
+    if (state.profile && state.profile.id) return state.profile.id;
+    return "";
+  }
+
   function loadAccountFlags() {
     if (!isLoggedIn() || !window.PadelAdmin || typeof PadelAdmin.accountFlags !== "function") {
       state.isAdmin = false;
-      return Promise.resolve({ is_admin: false, disabled: false });
+      clearCertifiedFlags();
+      return Promise.resolve({ is_admin: false, disabled: false, is_certified_rater: false });
     }
     return PadelAdmin.accountFlags().then(function (flags) {
       flags = flags || {};
       state.isAdmin = !!flags.is_admin;
+      applyCertifiedFlags(flags);
       return flags;
     }).catch(function () {
       state.isAdmin = false;
-      return { is_admin: false, disabled: false };
+      clearCertifiedFlags();
+      return { is_admin: false, disabled: false, is_certified_rater: false };
     });
   }
 
@@ -973,6 +995,7 @@
     $("home-cta-label").textContent = hasCard ? "קביעת רמה מחדש" : "קביעת רמה והקמת כרטיס";
     $("home-card-btn").classList.toggle("hidden", !hasCard);
     if ($("home-admin-btn")) $("home-admin-btn").classList.toggle("hidden", !state.isAdmin);
+    if ($("home-certified-badge")) $("home-certified-badge").classList.toggle("hidden", !state.isCertifiedRater);
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
   }
 
@@ -2738,7 +2761,10 @@
     }
 
     var aiOverall = overallAiForCard(card);
-    var ratingLine = ratingLineHtml(level) + aiRatingHtml(aiOverall, opts, card);
+    var certId = shareCardId(card);
+    var certRatings = (window.PadelCertified && certId && PadelCertified.cached(certId)) || [];
+    var certRow = window.PadelCertified ? PadelCertified.rowHtml(certRatings, { compact: !!opts.compact }) : "";
+    var ratingLine = certRow + ratingLineHtml(level) + aiRatingHtml(aiOverall, opts, card);
     if (opts.allowReupload && !opts.compact) vidHtml += aiCtaHtml(card);
 
     art.innerHTML =
@@ -2748,7 +2774,7 @@
         '<div class="ut-hero-shade"></div>' +
         '<div class="ut-hero-content">' +
           '<div class="ut-id"><h1>' + escapeHtml(p.name) + "</h1><p>" + escapeHtml(identity.join(" · ")) + "</p></div>" +
-          heroBadgeHtml(level, aiOverall, p.lr) +
+          heroBadgesWrapHtml(level, aiOverall, p.lr, certRatings) +
         "</div>" +
       "</div>" +
       (opts.allowReupload && needsPhotoReupload(photo) ? photoQualityPromptHtml() : "") +
@@ -2758,6 +2784,19 @@
         shotsHtml + courts + partnerHtml + vidHtml +
       "</div>";
     bindHeroPhoto(art, photo, opts.allowReupload);
+    if (window.PadelCertified) PadelCertified.hydrateCard(art, card);
+    if (opts.showRate && window.PadelCertified && PadelCertified.canRate(card)) {
+      var rateWrap = document.createElement("div");
+      rateWrap.className = "certified-inline-rate";
+      var rateBtn = document.createElement("button");
+      rateBtn.type = "button";
+      rateBtn.className = "btn btn-star";
+      rateBtn.textContent = "דרג כמוסמך ⭐";
+      rateBtn.addEventListener("click", function () { PadelCertified.openSheet(card); });
+      rateWrap.appendChild(rateBtn);
+      var body = art.querySelector(".ut-body");
+      if (body) body.appendChild(rateWrap);
+    }
     return art;
   }
 
@@ -3444,6 +3483,13 @@
     return L[lo].id + "-" + L[hi].id;
   }
 
+  function heroBadgesWrapHtml(level, ai, lr, ratings) {
+    var main = heroBadgeHtml(level, ai, lr);
+    var star = window.PadelCertified ? PadelCertified.heroBadgeHtml(ratings || []) : "";
+    if (!star) return main;
+    return '<div class="ut-hero-badges">' + main + star + "</div>";
+  }
+
   function heroBadgeHtml(level, ai, lr) {
     var info = levelBadgeInfo(level.id, ai, lr);
     if (info.kind === "range" || info.kind === "accepted") {
@@ -3807,11 +3853,20 @@
     var root = $("card-root");
     root.innerHTML = "";
     root.appendChild(createPremiumCard(data, { compact: false, partner: partner, allowReupload: owns }));
+    syncCertifiedRateBar(data, owns);
     if (owns && aiEligibleVideos(data.videos).length) warmAiServer();
   }
 
+  function syncCertifiedRateBar(card, owns) {
+    var bar = $("certified-rate-bar");
+    if (!bar) return;
+    var show = !!(window.PadelCertified && PadelCertified.canRate(card) && !owns);
+    bar.classList.toggle("hidden", !show);
+  }
+
   function renderPairColumn(card) {
-    return createPremiumCard(card, { compact: true, partner: null });
+    var showRate = !!(state.publicPair && window.PadelCertified && PadelCertified.canRate(card));
+    return createPremiumCard(card, { compact: true, partner: null, showRate: showRate });
   }
 
   function renderPair() {
@@ -4104,6 +4159,12 @@
   }
 
   function bind() {
+    if ($("certified-rate-btn")) {
+      $("certified-rate-btn").addEventListener("click", function () {
+        var data = state.publicCard ? state.publicCard : currentCardData();
+        if (window.PadelCertified) PadelCertified.openSheet(data);
+      });
+    }
     $("start-quiz").addEventListener("click", function () { startQuiz(true); });
     $("home-card-btn").addEventListener("click", function () { go("card"); });
     $("quiz-back").addEventListener("click", function () {
@@ -4318,6 +4379,7 @@
             state.disabledNotice = true;
             state.authReady = true;
             state.isAdmin = false;
+            clearCertifiedFlags();
             if (window.PadelAuth && PadelAuth.signOut) {
               showToast("החשבון אינו פעיל");
               PadelAuth.signOut();
@@ -4354,11 +4416,13 @@
     if (source === "sign-out") {
       state.auth = null;
       state.isAdmin = false;
+      clearCertifiedFlags();
       clearOwnerFromView();
       if (window.PadelLegal && PadelLegal.onSignedOut) PadelLegal.onSignedOut();
     } else {
       state.auth = null;
       state.isAdmin = false;
+      clearCertifiedFlags();
     }
     state.authReady = true;
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
@@ -4404,6 +4468,23 @@
     PadelLegal.init({
       go: go,
       showToast: showToast
+    });
+  }
+  if (window.PadelCertified) {
+    PadelCertified.init({
+      showToast: showToast,
+      cardId: shareCardId,
+      viewer: function () {
+        return {
+          isRater: !!state.isCertifiedRater,
+          raterId: state.certifiedRater && state.certifiedRater.id,
+          ownCardId: ownCardId()
+        };
+      },
+      onChanged: function () {
+        if (state.view === "card") renderCard();
+        else if (state.view === "pair") renderPair();
+      }
     });
   }
   if (window.PadelAdmin) {

@@ -6,14 +6,14 @@
     telaviv: "תל אביב", shfela: "שפלה", jerusalem: "ירושלים", south: "דרום"
   };
   var PROVIDERS = { google: "Google", email: "אימייל" };
-  var ACTIONS = { disable: "השבתה", enable: "הפעלה מחדש", "delete": "מחיקה" };
+  var ACTIONS = { disable: "השבתה", enable: "הפעלה מחדש", "delete": "מחיקה", cert_rater_add: "הוספת מוסמך", cert_rater_update: "עדכון מוסמך", cert_rater_email: "שיוך אימייל למוסמך", cert_rater_deactivate: "השבתת מוסמך", cert_rater_enable: "הפעלת מוסמך", cert_rater_delete: "מחיקת מוסמך", cert_rating_delete: "מחיקת דירוג מוסמך" };
   var hooks = {
     go: function () {},
     showToast: function () {},
     onViewCard: function () {},
     regionLabel: function (id) { return REGIONS[id] || id || "—"; }
   };
-  var cache = { search: "", sort: "created_at_desc", users: [], stats: null, actions: [] };
+  var cache = { search: "", sort: "created_at_desc", users: [], stats: null, actions: [], tab: "users", raters: [], certRatings: [] };
   var pendingDialog = null;
 
   function $(id) { return document.getElementById(id); }
@@ -46,6 +46,12 @@
     if (/cannot change an admin|cannot delete an admin/.test(m)) return "אי אפשר לשנות חשבון מנהל.";
     if (/email confirmation/.test(m)) return "כתובת האימייל שהוקלדה אינה תואמת.";
     if (/user not found/.test(m)) return "המשתמש לא נמצא.";
+    if (/not a certified rater/.test(m)) return "רק מוסמך פעיל יכול לתת דירוג כוכב.";
+    if (/email already in use/.test(m)) return "כתובת האימייל כבר משויכת למוסמך אחר.";
+    if (/invalid email/.test(m)) return "כתובת האימייל אינה תקינה.";
+    if (/invalid name/.test(m)) return "יש להזין שם מלא.";
+    if (/rater not found/.test(m)) return "המוסמך לא נמצא.";
+    if (/rating not found/.test(m)) return "הדירוג לא נמצא.";
     return raw ? ("שגיאה: " + raw) : "משהו השתבש.";
   }
 
@@ -105,12 +111,16 @@
     return Promise.all([
       rpc("admin_stats"),
       rpc("admin_list_users", { p_search: search, p_sort: sort }),
-      rpc("admin_list_actions")
+      rpc("admin_list_actions"),
+      rpc("admin_list_certified_raters"),
+      rpc("admin_list_certified_ratings")
     ]).then(function (parts) {
       cache.stats = parts[0] || {};
       cache.users = (parts[1] && parts[1].users) || [];
       cache.total = (parts[1] && parts[1].total) || cache.users.length;
       cache.actions = parts[2] || [];
+      cache.raters = parts[3] || [];
+      cache.certRatings = parts[4] || [];
       paint();
     });
   }
@@ -199,6 +209,87 @@
     paintStats();
     paintUsers();
     paintActions();
+    paintTabs();
+    paintRaters();
+    paintCertRatings();
+  }
+
+  function paintTabs() {
+    var tab = cache.tab || "users";
+    document.querySelectorAll("[data-admin-tab]").forEach(function (btn) {
+      var on = btn.getAttribute("data-admin-tab") === tab;
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    document.querySelectorAll("[data-admin-pane]").forEach(function (pane) {
+      pane.classList.toggle("hidden", pane.getAttribute("data-admin-pane") !== tab);
+    });
+  }
+
+  function setTab(tab) {
+    cache.tab = tab === "certified" ? "certified" : "users";
+    paintTabs();
+  }
+
+  function paintRaters() {
+    var root = $("admin-raters");
+    if (!root) return;
+    var count = $("admin-rater-count");
+    var list = cache.raters || [];
+    if (count) count.textContent = list.length ? (list.length + " מוסמכים") : "אין מוסמכים";
+    if (!list.length) {
+      root.innerHTML = '<p class="admin-empty">עדיין אין מוסמכים ברשימה.</p>';
+      return;
+    }
+    root.innerHTML = list.map(function (r) {
+      var active = !!r.active;
+      var ratings = r.ratings_count == null ? 0 : r.ratings_count;
+      return '<article class="admin-user' + (active ? "" : " is-disabled") + '" data-rater-id="' + escapeHtml(r.id) + '">' +
+        '<div class="admin-user-top">' +
+          '<div class="admin-user-id">' +
+            "<strong>" + escapeHtml(r.full_name || "") + "</strong>" +
+            '<span class="admin-email" dir="ltr">' + escapeHtml(r.email || "אין אימייל משויך") + "</span>" +
+          "</div>" +
+          '<span class="admin-status ' + (active ? "is-on" : "is-off") + '">' + (active ? "פעיל" : "לא פעיל") + "</span>" +
+        "</div>" +
+        '<dl class="admin-meta">' +
+          "<div><dt>דירוגים שניתנו</dt><dd>" + escapeHtml(String(ratings)) + "</dd></div>" +
+          "<div><dt>נוסף</dt><dd>" + escapeHtml(fmtDate(r.created_at)) + "</dd></div>" +
+        "</dl>" +
+        '<div class="admin-user-actions">' +
+          '<button type="button" class="btn btn-ghost" data-rater-act="email">שיוך אימייל</button>' +
+          '<button type="button" class="btn btn-ghost" data-rater-act="' + (active ? "deactivate" : "enable") + '">' +
+            (active ? "השבתה" : "הפעלה") + "</button>" +
+          '<button type="button" class="btn btn-danger" data-rater-act="delete">הסרה</button>' +
+        "</div>" +
+      "</article>";
+    }).join("");
+  }
+
+  function paintCertRatings() {
+    var root = $("admin-cert-ratings");
+    if (!root) return;
+    var list = cache.certRatings || [];
+    if (!list.length) {
+      root.innerHTML = '<p class="admin-empty">עדיין אין דירוגי כוכב.</p>';
+      return;
+    }
+    root.innerHTML = '<ol class="admin-log-list">' + list.map(function (r) {
+      var who = r.player_name || r.card_id || "שחקן";
+      var note = r.note ? '<p class="admin-muted" style="margin:4px 0 0">' + escapeHtml(r.note) + "</p>" : "";
+      return '<li class="admin-cert-rating" data-rating-id="' + escapeHtml(r.id) + '">' +
+        '<div class="admin-cert-rating-top">' +
+          '<strong class="admin-cert-level" dir="ltr">' + escapeHtml(r.level || "") + "</strong>" +
+          "<span>" + escapeHtml(who) + " · " + escapeHtml(r.rater_name || "מוסמך") + "</span>" +
+        "</div>" +
+        '<span class="admin-log-meta">' + escapeHtml(fmtDate(r.updated_at || r.created_at)) +
+          (r.rater_email ? " · " + escapeHtml(r.rater_email) : "") + "</span>" +
+        note +
+        '<div class="admin-user-actions" style="margin-top:8px">' +
+          '<button type="button" class="btn btn-danger" data-rating-act="delete">מחיקת דירוג</button>' +
+        "</div>" +
+      "</li>";
+    }).join("") + "</ol>";
   }
 
   function setBusy(busy) {
@@ -236,10 +327,15 @@
     }
     var field = $("admin-dialog-field");
     var input = $("admin-dialog-email");
-    if (field) field.classList.toggle("hidden", !opts.requireEmail);
+    var showField = !!(opts.requireEmail || opts.emailInput);
+    if (field) {
+      field.classList.toggle("hidden", !showField);
+      var lab = field.querySelector("label");
+      if (lab) lab.textContent = opts.fieldLabel || "כתובת האימייל לאישור";
+    }
     if (input) {
-      input.value = "";
-      if (opts.requireEmail) setTimeout(function () { input.focus(); }, 50);
+      input.value = opts.emailValue || "";
+      if (showField) setTimeout(function () { input.focus(); }, 50);
     }
     var yes = $("admin-dialog-yes");
     if (yes) yes.textContent = opts.yesLabel || "אישור";
@@ -256,15 +352,113 @@
       return;
     }
     var user = opts.user;
+    var rater = opts.rater;
     closeDialog();
     setBusy(true);
     var work;
     if (opts.act === "disable") work = rpc("admin_set_disabled", { p_user_id: user.id, p_disabled: true });
     else if (opts.act === "enable") work = rpc("admin_set_disabled", { p_user_id: user.id, p_disabled: false });
     else if (opts.act === "delete") work = rpc("admin_delete_user", { p_user_id: user.id, p_email: typed });
+    else if (opts.act === "cert-email") work = rpc("admin_set_certified_rater_email", { p_id: rater.id, p_email: typed || null });
+    else if (opts.act === "cert-deactivate") work = rpc("admin_update_certified_rater", { p_id: rater.id, p_full_name: null, p_active: false });
+    else if (opts.act === "cert-enable") work = rpc("admin_update_certified_rater", { p_id: rater.id, p_full_name: null, p_active: true });
+    else if (opts.act === "cert-delete") work = rpc("admin_delete_certified_rater", { p_id: rater.id });
+    else if (opts.act === "cert-rating-delete") work = rpc("admin_delete_certified_rating", { p_id: opts.ratingId });
     else work = Promise.resolve();
     work.then(function () {
       hooks.showToast(opts.doneToast || "הפעולה בוצעה");
+      return refresh();
+    }).catch(function (err) {
+      setBusy(false);
+      hooks.showToast(hebrewError(err));
+    });
+  }
+
+  function findRater(id) {
+    return (cache.raters || []).filter(function (r) { return r.id === id; })[0];
+  }
+
+  function onRaterAction(act, raterId) {
+    var rater = findRater(raterId);
+    if (!rater) return;
+    if (act === "email") {
+      openDialog({
+        act: "cert-email",
+        rater: rater,
+        emailInput: true,
+        emailValue: rater.email || "",
+        fieldLabel: "כתובת האימייל לשיוך",
+        title: "שיוך אימייל",
+        text: "עם אימייל משויך, " + (rater.full_name || "המוסמך") + " יוכל לדרג כרטיסים אחרי התחברות.",
+        yesLabel: "שמירה",
+        doneToast: "האימייל עודכן"
+      });
+      return;
+    }
+    if (act === "deactivate") {
+      openDialog({
+        act: "cert-deactivate",
+        rater: rater,
+        title: "השבתת מוסמך",
+        text: "להשבית את " + (rater.full_name || "") + "? דירוגים קיימים יישארו בכרטיסים, אבל לא יוכל לתת דירוג חדש.",
+        yesLabel: "השבתה",
+        doneToast: "המוסמך הושבת"
+      });
+      return;
+    }
+    if (act === "enable") {
+      openDialog({
+        act: "cert-enable",
+        rater: rater,
+        title: "הפעלת מוסמך",
+        text: "להפעיל מחדש את " + (rater.full_name || "") + "?",
+        yesLabel: "הפעלה",
+        doneToast: "המוסמך הופעל"
+      });
+      return;
+    }
+    if (act === "delete") {
+      openDialog({
+        act: "cert-delete",
+        rater: rater,
+        danger: true,
+        title: "הסרת מוסמך",
+        text: "להסיר את " + (rater.full_name || "") + " מהרשימה? כל הדירוגים שנתן יימחקו.",
+        yesLabel: "הסרה",
+        doneToast: "המוסמך הוסר"
+      });
+    }
+  }
+
+  function onRatingDelete(ratingId) {
+    var row = (cache.certRatings || []).filter(function (r) { return r.id === ratingId; })[0];
+    if (!row) return;
+    openDialog({
+      act: "cert-rating-delete",
+      ratingId: ratingId,
+      danger: true,
+      title: "מחיקת דירוג",
+      text: "למחוק את דירוג " + (row.level || "") + " של " + (row.rater_name || "המוסמך") +
+        (row.player_name ? (" ל" + row.player_name) : "") + "?",
+      yesLabel: "מחיקה",
+      doneToast: "הדירוג נמחק"
+    });
+  }
+
+  function addRaterFromForm() {
+    var nameEl = $("admin-rater-name");
+    var emailEl = $("admin-rater-email");
+    var name = ((nameEl && nameEl.value) || "").trim();
+    var email = ((emailEl && emailEl.value) || "").trim();
+    if (name.length < 2) {
+      hooks.showToast("יש להזין שם מלא.");
+      return;
+    }
+    setBusy(true);
+    rpc("admin_add_certified_rater", { p_full_name: name, p_email: email || null }).then(function () {
+      if (nameEl) nameEl.value = "";
+      if (emailEl) emailEl.value = "";
+      hooks.showToast("המוסמך נוסף");
       return refresh();
     }).catch(function (err) {
       setBusy(false);
@@ -378,6 +572,31 @@
     if (dlg) dlg.addEventListener("click", function (ev) { if (ev.target === dlg) closeDialog(); });
     if ($("home-admin-btn")) $("home-admin-btn").addEventListener("click", function () { hooks.go("admin"); });
     if ($("admin-preview-back")) $("admin-preview-back").addEventListener("click", function () { hooks.go("admin"); });
+    document.querySelectorAll("[data-admin-tab]").forEach(function (btn) {
+      btn.addEventListener("click", function () { setTab(btn.getAttribute("data-admin-tab")); });
+    });
+    var form = $("admin-rater-form");
+    if (form) form.addEventListener("submit", function (ev) { ev.preventDefault(); addRaterFromForm(); });
+    var raters = $("admin-raters");
+    if (raters) {
+      raters.addEventListener("click", function (ev) {
+        var btn = ev.target.closest("[data-rater-act]");
+        if (!btn) return;
+        var card = ev.target.closest("[data-rater-id]");
+        if (!card) return;
+        onRaterAction(btn.getAttribute("data-rater-act"), card.getAttribute("data-rater-id"));
+      });
+    }
+    var ratings = $("admin-cert-ratings");
+    if (ratings) {
+      ratings.addEventListener("click", function (ev) {
+        var btn = ev.target.closest("[data-rating-act]");
+        if (!btn || btn.getAttribute("data-rating-act") !== "delete") return;
+        var row = ev.target.closest("[data-rating-id]");
+        if (!row) return;
+        onRatingDelete(row.getAttribute("data-rating-id"));
+      });
+    }
   }
 
   function render() {

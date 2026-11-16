@@ -212,3 +212,20 @@ export async function clearLegalAcceptance(userId) {
   const res = await adminFetch("/rest/v1/legal_acceptances?user_id=eq." + encodeURIComponent(userId), { method: "DELETE" });
   if (!res.ok && res.status !== 404) throw new Error("clearLegalAcceptance failed: " + errMsg(res, "clear legal"));
 }
+
+// Test-only: remove certified raters/ratings created for disposable @example.com accounts.
+// Never deletes the seeded Hebrew-name raters that have no email.
+export async function cleanupCertifiedTestData() {
+  const ratersRes = await adminFetch("/rest/v1/certified_raters?select=id,email,full_name", { method: "GET" });
+  if (!ratersRes.ok) throw new Error("list raters failed: " + errMsg(ratersRes, "raters"));
+  const raters = Array.isArray(ratersRes.body) ? ratersRes.body : [];
+  const testRaters = raters.filter((r) => {
+    const email = String(r && r.email || "").toLowerCase();
+    return email.endsWith("@example.com") && /padel\.test/.test(email);
+  });
+  for (const r of testRaters) {
+    await adminFetch("/rest/v1/certified_ratings?rater_id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
+    await adminFetch("/rest/v1/certified_raters?id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
+  }
+  return testRaters.length;
+}

@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v18/styles.css" />
-  <link rel="stylesheet" href="v18/cards.css" />
+  <link rel="stylesheet" href="v19/styles.css" />
+  <link rel="stylesheet" href="v19/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -52,6 +52,7 @@
         <button class="btn btn-ghost" id="home-login-btn" type="button" style="margin-top:10px">התחברות</button>
         <div class="auth-status hidden" id="home-auth-status">
           <p>מחוברים כ־<strong id="home-auth-email" dir="ltr"></strong></p>
+          <p class="home-certified-badge hidden" id="home-certified-badge">אתה מוסמך דירוג ⭐</p>
           <button class="btn btn-ghost" id="home-logout-btn" type="button">התנתקות</button>
         </div>
         <section class="hiw" aria-labelledby="hiw-title">
@@ -408,6 +409,11 @@
           <h1>קונסולת מנהל</h1>
           <p class="lede">מעקב אחרי משתמשים, כרטיסים ופעילות באתר.</p>
         </header>
+        <div class="admin-tabs" role="tablist" aria-label="מדורי ניהול">
+          <button type="button" class="admin-tab is-on" id="admin-tab-users" data-admin-tab="users" role="tab" aria-selected="true">משתמשים</button>
+          <button type="button" class="admin-tab" id="admin-tab-certified" data-admin-tab="certified" role="tab" aria-selected="false">מוסמכים</button>
+        </div>
+        <div id="admin-pane-users" class="admin-pane" data-admin-pane="users">
         <div id="admin-stats" class="admin-stats" aria-label="סטטיסטיקה"></div>
         <div class="admin-toolbar">
           <div class="admin-toolbar-top">
@@ -435,6 +441,30 @@
           <h2 id="admin-log-title">יומן פעולות</h2>
           <div id="admin-actions"></div>
         </section>
+        </div>
+        <div id="admin-pane-certified" class="admin-pane hidden" data-admin-pane="certified">
+          <div class="admin-toolbar">
+            <div class="admin-toolbar-top">
+              <h2>מוסמכים</h2>
+              <span id="admin-rater-count" class="admin-muted"></span>
+            </div>
+            <p class="lede" style="margin-top:4px">מאמנים ומומחים שרשאים לתת דירוג כוכב בכרטיס. אימייל משויך מאפשר להם לדרג אחרי התחברות.</p>
+            <form id="admin-rater-form" class="admin-rater-form" autocomplete="off">
+              <label>שם מלא
+                <input id="admin-rater-name" type="text" required maxlength="80" placeholder="למשל עמית נאור" />
+              </label>
+              <label>אימייל (לא חובה)
+                <input id="admin-rater-email" type="email" dir="ltr" maxlength="254" placeholder="name@example.com" />
+              </label>
+              <button class="btn btn-primary" id="admin-rater-add" type="submit">הוספת מוסמך</button>
+            </form>
+          </div>
+          <div id="admin-raters" class="admin-users"></div>
+          <section class="admin-log" aria-labelledby="admin-cert-log-title">
+            <h2 id="admin-cert-log-title">דירוגים אחרונים</h2>
+            <div id="admin-cert-ratings"></div>
+          </section>
+        </div>
       </div>
     </section>
 
@@ -468,6 +498,9 @@
 
     <section id="view-card" class="view hidden">
       <div id="card-root"></div>
+      <div class="ut-owner-bar certified-rate-bar hidden" id="certified-rate-bar">
+        <button class="btn btn-star" id="certified-rate-btn" type="button">דרג כמוסמך ⭐</button>
+      </div>
       <div class="ut-owner-bar hidden" id="owner-actions">
         <button class="btn btn-primary" id="copy-own-link" type="button">העתק קישור</button>
         <a class="btn btn-whatsapp hidden" id="wa-share-own" href="https://wa.me/" target="_blank" rel="noopener">
@@ -661,14 +694,31 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
-  <script src="v18/config.js"></script>
+
+  <div id="certified-sheet" class="certified-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="certified-sheet-title">
+    <div class="certified-sheet-card">
+      <h2 id="certified-sheet-title">דירוג מוסמך ⭐</h2>
+      <p class="lede">מה הרמה של <strong id="certified-sheet-name"></strong> לפי הסולם הישראלי?</p>
+      <div id="certified-levels" class="certified-levels" role="group" aria-label="בחירת רמה"></div>
+      <label class="certified-note-label" for="certified-note">הערה (לא חובה)</label>
+      <textarea id="certified-note" maxlength="200" rows="3" placeholder="למשל: רשת יציבה, עדיין מתקשה מהזכוכית."></textarea>
+      <p class="note" id="certified-note-count">עד 200 תווים</p>
+      <div class="btn-row two" style="margin-top:14px">
+        <button type="button" class="btn btn-ghost" id="certified-sheet-cancel">ביטול</button>
+        <button type="button" class="btn btn-primary" id="certified-sheet-save">שמירת דירוג</button>
+      </div>
+      <button type="button" class="text-btn certified-remove hidden" id="certified-sheet-remove">הסרת הדירוג שלי</button>
+    </div>
+  </div>
+  <script src="v19/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
-  <script src="v18/quiz.js"></script>
-  <script src="v18/players.js"></script>
-  <script src="v18/track.js"></script>
-  <script src="v18/auth.js"></script>
-  <script src="v18/admin.js"></script>
-  <script src="v18/legal.js"></script>
-  <script src="v18/app.js"></script>
+  <script src="v19/quiz.js"></script>
+  <script src="v19/players.js"></script>
+  <script src="v19/track.js"></script>
+  <script src="v19/auth.js"></script>
+  <script src="v19/admin.js"></script>
+  <script src="v19/legal.js"></script>
+  <script src="v19/certified.js"></script>
+  <script src="v19/app.js"></script>
 </body>
 </html>

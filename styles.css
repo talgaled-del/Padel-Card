@@ -1704,3 +1704,141 @@ body:has(#legal-pending-bar:not(.hidden)) #app { padding-bottom: calc(72px + var
 .vid-tips.is-compact .vid-tips-title { font-size: 0.86rem; }
 .vid-tips.is-compact .vid-tips-lead { font-size: 0.76rem; margin-bottom: 6px; }
 .vid-tips.is-compact li { font-size: 0.76rem; }
+
+/* v19 certified rating */
+.home-certified-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 224, 138, 0.2), rgba(240, 193, 74, 0.12));
+  border: 1px solid rgba(240, 193, 74, 0.45);
+  color: #ffe08a;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+.home-certified-badge.hidden { display: none; }
+
+.btn-star {
+  width: 100%;
+  background: linear-gradient(180deg, #ffe7a3, #f0c14a);
+  color: #3a2808;
+  border: 0;
+  font-weight: 800;
+  box-shadow: 0 8px 20px rgba(240, 193, 74, 0.25);
+}
+.btn-star:active { transform: translateY(1px); }
+.certified-rate-bar { margin-top: 14px; }
+
+.certified-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px 16px calc(16px + var(--safe-bottom));
+  background: rgba(3, 8, 6, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.certified-sheet.hidden { display: none; }
+.certified-sheet-card {
+  width: min(440px, 100%);
+  background: #101910;
+  border: 1px solid rgba(240, 193, 74, 0.35);
+  border-radius: 24px 24px 18px 18px;
+  padding: 22px 18px 18px;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+}
+.certified-sheet-card h2 { margin: 0 0 8px; font-size: 1.25rem; }
+.certified-levels {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 14px 0 16px;
+}
+.certified-level {
+  appearance: none;
+  border: 1px solid rgba(240, 193, 74, 0.28);
+  background: rgba(240, 193, 74, 0.06);
+  color: #ffe08a;
+  border-radius: 14px;
+  padding: 12px 0;
+  font-family: "Oswald", "Heebo", sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.certified-level.is-on {
+  background: linear-gradient(180deg, #ffe7a3, #f0c14a);
+  color: #3a2808;
+  border-color: transparent;
+}
+.certified-note-label { display: block; font-size: 0.82rem; font-weight: 700; margin-bottom: 6px; }
+#certified-note {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(7, 18, 14, 0.7);
+  color: var(--text);
+  padding: 12px;
+  font: inherit;
+  resize: vertical;
+  min-height: 74px;
+}
+.certified-remove { display: block; margin: 12px auto 0; color: #ffb4b4; }
+.certified-remove.hidden { display: none; }
+
+.admin-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 0 16px;
+  padding: 4px;
+  border-radius: 16px;
+  background: rgba(12, 28, 22, 0.85);
+  border: 1px solid var(--line-strong);
+}
+.admin-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 800;
+  padding: 10px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.admin-tab.is-on { background: var(--lime); color: #04140f; }
+.admin-rater-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(12, 28, 22, 0.85);
+  border: 1px solid var(--line-strong);
+}
+.admin-rater-form label { display: grid; gap: 4px; font-size: 0.74rem; font-weight: 700; color: var(--muted); }
+.admin-rater-form input {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(7, 18, 14, 0.7);
+  color: var(--text);
+  padding: 11px 12px;
+  font: inherit;
+}
+.admin-rater-form .btn { width: auto; padding: 12px 16px; }
+.admin-cert-rating {
+  padding: 12px 0;
+  border-top: 1px solid var(--line-strong);
+}
+.admin-cert-rating-top { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.admin-cert-level { font-family: "Oswald", "Heebo", sans-serif; color: #ffe08a; font-size: 1.1rem; }
+.certified-inline-rate { margin-top: 12px; }
+.certified-inline-rate .btn { width: 100%; }
