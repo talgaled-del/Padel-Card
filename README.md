@@ -5,7 +5,7 @@
 ## הרצה מקומית
 
 ```bash
-python3 -m http.server 8765 --directory /workspace/padel-card-v14
+python3 -m http.server 8765 --directory /workspace/padel-card-v15
 ```
 
 פתיחה: http://127.0.0.1:8765/
@@ -14,7 +14,7 @@ python3 -m http.server 8765 --directory /workspace/padel-card-v14
 
 לא לפרוס לציבור — זה אבטיפוס בלבד.
 
-הנכסים הסטטיים נטענים מתיקייה `v14/` (למשל `v14/app.js`) כדי לעקוף את מטמון ה-CDN של Render, שמתעלם ממחרוזת `?v=N`. אחרי עדכון, מעתיקים את הקבצים לתיקיית גרסה חדשה ומעדכנים את `index.html`.
+הנכסים הסטטיים נטענים מתיקייה `v15/` (למשל `v15/app.js`) כדי לעקוף את מטמון ה-CDN של Render, שמתעלם ממחרוזת `?v=N`. אחרי עדכון, מעתיקים את הקבצים לתיקיית גרסה חדשה ומעדכנים את `index.html`.
 
 ## סולם הרמות
 
@@ -34,7 +34,7 @@ D2 (2.0 מתחיל) · D1 (2.5) · C2 (3.0) · C1 (3.5) · B2 (4.0) · B1 (4.5) 
 ### מה צריך לעשות
 1. ב-GitHub, צרו מאגר ריק חדש (מומלץ ציבורי) בשם למשל `padel-card` תחת המשתמש `talgaled-del`.
 2. שלחו את כתובת המאגר (למשל `https://github.com/talgaled-del/padel-card`).
-3. נדחוף את הקבצים מ-`/workspace/padel-card-v14/` ונפרוס Static Site ב-Render לפי `render.yaml`
+3. נדחוף את הקבצים מ-`/workspace/padel-card-v15/` ונפרוס Static Site ב-Render לפי `render.yaml`
    (`buildCommand: true`, `staticPublishPath: ./`).
 
 דמו אחרי הפריסה:
@@ -79,3 +79,12 @@ v13 נשאר כמו שהוא (AI Rating לפי סרטון, פס התקדמות, 
    - **Redirect URLs:** `https://padel-card.onrender.com`, `https://padel-card.onrender.com/**`, ולבדיקות מקומיות `http://127.0.0.1:8765` / `http://localhost:8765` (או הפורט שבו מריצים).
 2. **Email OTP:** Authentication → Providers → Email — הספק מופעל. מומלץ לכבות Confirm email באבטיפוס. בתבנית המייל (Magic Link / OTP) חייב להופיע `{{ .Token }}`, לא רק קישור.
 3. **Google:** ב-Google Cloud צרו OAuth client (Web application). Authorized JavaScript origins: `https://padel-card.onrender.com` ו-`http://127.0.0.1:8765`. Authorized redirect URI חייב להיות של Supabase: `https://ehcsbtbcelfoxfgraytl.supabase.co/auth/v1/callback`. ב-Supabase: Authentication → Providers → Google — הדביקו Client ID ו-Secret.
+
+## v15
+
+הכרטיס קשור לחשבון המחובר. אחרי התחברות (וגם בטעינה עם סשן קיים) נטען הכרטיס מטבלת `public.cards` ב-Supabase. אם אין עדיין שורה אבל יש כרטיס במכשיר (`padelCard.v2`), הוא מועלה אוטומטית לחשבון — כך הכרטיס שטל בנה עד כה עובר לחשבון כשיתחבר במכשיר שבו הוא שמור. כל שמירה (פרופיל, שאלון, סרטונים, AI, החלטת תג) מעדכנת את השורה בענן (עם השהייה קצרה). מזהה הכרטיס נשמר כדי שקישורי השיתוף הקיימים ימשיכו לעבוד.
+
+- **צפייה ועריכה של הכרטיס שלי** רק אחרי התחברות. במסך הבית, בלי התחברות, מופיע מסך ההתחברות («התחברו כדי ליצור ולשמור את כרטיס השחקן שלכם»).
+- **קישורי שיתוף** (`#/p/...`, `#/pair/...`, כרטיסי דוגמה) נשארים פתוחים לכולם בלי התחברות, כולל שתי שורות הדירוג.
+- אם יש כרטיס בענן וכרטיס מקומי שונה, הענן גובר, והעותק המקומי נשמר ב-`padelCard.v2.backup`. התנתקות מחזירה למסך ההתחברות ולא מוחקת את הנתונים.
+- הנכסים הסטטיים ב-`v15/`. בדיקות: `node scripts/verify-v15.mjs` (רגרסיית v13/v14 אחרי התחברות), `node scripts/verify-v15-auth.mjs` (שער התחברות + מבקר), `node scripts/verify-v15-sync.mjs` (סיבוב אמיתי מול Supabase עם משתמש בדיקה שנמחק בסוף).

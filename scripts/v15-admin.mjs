@@ -1,0 +1,126 @@
+/* Test-only Admin helpers for v15. Reads SUPABASE_ACCESS_TOKEN from the
+   environment (or SUPABASE_SERVICE_ROLE_KEY). Never logs or writes secrets. */
+const PROJECT = "ehcsbtbcelfoxfgraytl";
+const SUPABASE_URL = "https://ehcsbtbcelfoxfgraytl.supabase.co";
+export const TEST_EMAIL = process.env.PADEL_TEST_EMAIL || "padel.test.v15@example.com";
+
+let serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+let resolved = false;
+
+function randomPassword() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("") + "Aa1!";
+}
+
+async function loadServiceRoleKey() {
+  if (resolved) return serviceRoleKey;
+  if (serviceRoleKey) {
+    resolved = true;
+    return serviceRoleKey;
+  }
+  const token = process.env.SUPABASE_ACCESS_TOKEN;
+  if (!token) throw new Error("Set SUPABASE_ACCESS_TOKEN or SUPABASE_SERVICE_ROLE_KEY in the environment");
+  const res = await fetch("https://api.supabase.com/v1/projects/" + PROJECT + "/api-keys?reveal=true", {
+    headers: { Authorization: "Bearer " + token, Accept: "application/json" }
+  });
+  if (!res.ok) throw new Error("Management API api-keys HTTP " + res.status);
+  const keys = await res.json();
+  const list = Array.isArray(keys) ? keys : [];
+  const service = list.find((k) => k && (k.id === "service_role" || k.name === "service_role"));
+  const value = service && (service.api_key || service.apiKey);
+  if (!value) throw new Error("service_role key not found in Management API response");
+  serviceRoleKey = value;
+  resolved = true;
+  return serviceRoleKey;
+}
+
+async function adminFetch(path, opts = {}) {
+  const key = await loadServiceRoleKey();
+  const headers = Object.assign({
+    apikey: key,
+    Authorization: "Bearer " + key,
+    "Content-Type": "application/json"
+  }, opts.headers || {});
+  const res = await fetch(SUPABASE_URL + path, Object.assign({}, opts, { headers }));
+  const text = await res.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch (err) { body = text; }
+  return { ok: res.ok, status: res.status, body };
+}
+
+function errMsg(res, fallback) {
+  const b = res && res.body;
+  if (b && typeof b === "object") return b.message || b.error_description || b.error || fallback;
+  if (typeof b === "string" && b) return b.slice(0, 200);
+  return fallback + " HTTP " + (res && res.status);
+}
+
+export async function ensureTestUser() {
+  const password = process.env.PADEL_TEST_PASSWORD || randomPassword();
+  const created = await adminFetch("/auth/v1/admin/users", {
+    method: "POST",
+    body: JSON.stringify({
+      email: TEST_EMAIL,
+      password: password,
+      email_confirm: true,
+      user_metadata: { purpose: "v15-automated-test" }
+    })
+  });
+  if (created.ok && created.body && created.body.id) {
+    return { id: created.body.id, email: TEST_EMAIL, password: password };
+  }
+  const listed = await adminFetch("/auth/v1/admin/users?page=1&per_page=200", { method: "GET" });
+  if (!listed.ok) throw new Error("list users failed: " + errMsg(listed, "list"));
+  const users = (listed.body && (listed.body.users || listed.body)) || [];
+  const existing = users.find((u) => u && String(u.email || "").toLowerCase() === TEST_EMAIL);
+  if (!existing) throw new Error("could not create or find test user: " + errMsg(created, "create"));
+  const updated = await adminFetch("/auth/v1/admin/users/" + existing.id, {
+    method: "PUT",
+    body: JSON.stringify({ password: password, email_confirm: true })
+  });
+  if (!updated.ok) throw new Error("could not reset test user password: " + errMsg(updated, "update"));
+  return { id: existing.id, email: TEST_EMAIL, password: password };
+}
+
+export async function deleteTestUser(userId) {
+  if (!userId) return;
+  await adminFetch("/rest/v1/cards?user_id=eq." + encodeURIComponent(userId), { method: "DELETE" });
+  const res = await adminFetch("/auth/v1/admin/users/" + userId, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error("delete test user failed: " + errMsg(res, "delete"));
+}
+
+export async function deleteCard(userId) {
+  if (!userId) return;
+  const res = await adminFetch("/rest/v1/cards?user_id=eq." + encodeURIComponent(userId), { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error("delete card failed: " + errMsg(res, "delete card"));
+}
+
+export async function upsertCard(userId, card) {
+  const res = await adminFetch("/rest/v1/cards", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({ user_id: userId, card: card, updated_at: new Date().toISOString() })
+  });
+  if (!res.ok) throw new Error("upsert card failed: " + errMsg(res, "upsert"));
+  return res.body;
+}
+
+export async function getCard(userId) {
+  const res = await adminFetch("/rest/v1/cards?user_id=eq." + encodeURIComponent(userId) + "&select=card,updated_at", {
+    method: "GET",
+    headers: { Accept: "application/json" }
+  });
+  if (!res.ok) throw new Error("get card failed: " + errMsg(res, "get card"));
+  const rows = Array.isArray(res.body) ? res.body : [];
+  return rows[0] || null;
+}
+
+export const DEVICE = {
+  viewport: { width: 390, height: 844 },
+  deviceScaleFactor: 3,
+  isMobile: true,
+  hasTouch: true,
+  locale: "he-IL",
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+};

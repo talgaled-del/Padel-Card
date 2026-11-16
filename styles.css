@@ -1289,6 +1289,7 @@ input[type="url"],
 }
 
 /* Auth / login */
+.login-demos { margin-top: 22px; }
 .auth-card {
   margin-top: 8px;
 }

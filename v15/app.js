@@ -1,5 +1,7 @@
 (function () {
   const STORAGE_KEY = "padelCard.v2";
+  const BACKUP_KEY = "padelCard.v2.backup";
+  const CLOUD_SAVE_MS = 700;
   const PHOTO_SHARE_MAX = 18000;
   const videoBlobs = new Map();
   const CLOUDINARY = {
@@ -49,7 +51,9 @@
     photo: null,
     partnerId: null,
     shareMode: "single",
-    auth: null
+    auth: null,
+    authReady: false,
+    cloudSynced: false
   };
 
   const $ = function (id) { return document.getElementById(id); };
@@ -58,50 +62,85 @@
     return "local-" + Date.now().toString(16) + "-" + Math.random().toString(16).slice(2, 8);
   }
 
-  function loadSaved() {
+  function mapVideos(list) {
+    return (list || []).map(function (v) {
+      return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
+    });
+  }
+
+  function serializeVideos(list) {
+    return (list || []).filter(function (v) { return !v.uploading; }).map(function (v) {
+      return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, localOnly: !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
+    });
+  }
+
+  function readLocalPayload(key) {
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        migrateV1();
-        return;
-      }
+      var raw = localStorage.getItem(key || STORAGE_KEY);
+      if (!raw) return null;
       var data = JSON.parse(raw);
-      state.levelId = data.levelId || null;
-      state.profile = data.profile || null;
-      state.answers = data.answers || [];
-      state.photo = (data.profile && data.profile.photo) || data.photo || null;
-      state.partnerId = (data.profile && data.profile.partnerId) || data.partnerId || null;
-      if (state.profile) state.profile.tenure = normalizeTenure(state.profile.tenure || "");
-      state.videos = (data.videos || []).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
-      });
-      state.auth = data.auth || null;
-      if (state.profile && state.auth) {
-        state.profile.authUserId = state.auth.userId;
-        state.profile.authEmail = state.auth.email;
-      }
+      return data && typeof data === "object" ? data : null;
     } catch (err) {
-      console.warn("לא ניתן לטעון נתונים שמורים", err);
+      return null;
     }
   }
 
-  function migrateV1() {
+  function writeLocalPayload(payload, key) {
     try {
-      var raw = localStorage.getItem("padelCard.v1");
-      if (!raw) return;
-      var data = JSON.parse(raw);
-      state.levelId = data.levelId || null;
-      state.profile = data.profile || null;
-      if (state.profile && !state.profile.id) state.profile.id = uid();
-      state.answers = data.answers || [];
-      state.videos = (data.videos || []).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
-      });
-      persist();
-    } catch (err) { /* ignore */ }
+      localStorage.setItem(key || STORAGE_KEY, JSON.stringify(payload));
+    } catch (err) {
+      console.warn("שמירה מקומית נכשלה", err);
+    }
   }
 
-  function persist() {
+  function hasCardPayload(data) {
+    if (!data) return false;
+    if (data.levelId && data.profile) return true;
+    if (data.profile && data.profile.id) return true;
+    if (data.videos && data.videos.length) return true;
+    if (data.answers && data.answers.length) return true;
+    return false;
+  }
+
+  function fingerprintPayload(data) {
+    if (!data) return "";
+    var profile = data.profile || {};
+    var videos = (data.videos || []).map(function (v) {
+      return [v.id || "", v.link || "", v.trackUrl || "", v.ai && v.ai.l, v.marker ? JSON.stringify(v.marker) : ""].join(":");
+    });
+    return JSON.stringify({
+      levelId: data.levelId || null,
+      id: profile.id || "",
+      name: profile.name || "",
+      ai: profile.ai || null,
+      lr: profile.lr || null,
+      answers: data.answers || [],
+      videos: videos,
+      photo: profile.photo || data.photo || null,
+      partnerId: profile.partnerId || data.partnerId || null
+    });
+  }
+
+  function payloadsDiffer(a, b) {
+    return fingerprintPayload(a) !== fingerprintPayload(b);
+  }
+
+  function applyPayload(data) {
+    if (!data) return;
+    state.levelId = data.levelId || null;
+    state.profile = data.profile || null;
+    state.answers = data.answers || [];
+    state.photo = (data.profile && data.profile.photo) || data.photo || null;
+    state.partnerId = (data.profile && data.profile.partnerId) || data.partnerId || null;
+    if (state.profile) state.profile.tenure = normalizeTenure(state.profile.tenure || "");
+    state.videos = mapVideos(data.videos);
+    if (state.profile && state.auth) {
+      state.profile.authUserId = state.auth.userId;
+      state.profile.authEmail = state.auth.email;
+    }
+  }
+
+  function payloadFromState() {
     if (state.profile) {
       state.profile.photo = state.photo || null;
       state.profile.partnerId = state.partnerId || null;
@@ -110,17 +149,149 @@
       state.profile.authUserId = state.auth.userId;
       state.profile.authEmail = state.auth.email;
     }
-    var payload = {
+    return {
       levelId: state.levelId,
       profile: state.profile,
       auth: state.auth || null,
       answers: state.answers,
-      videos: state.videos.filter(function (v) { return !v.uploading; }).map(function (v) {
-        return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, localOnly: !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
-      })
+      videos: serializeVideos(state.videos)
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }
+
+  function readLegacyLocal() {
+    var data = readLocalPayload(STORAGE_KEY);
+    if (data) return data;
+    try {
+      var raw = localStorage.getItem("padelCard.v1");
+      if (!raw) return null;
+      data = JSON.parse(raw);
+      if (!data) return null;
+      if (data.profile && !data.profile.id) data.profile.id = uid();
+      return data;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function clearOwnerFromView() {
+    accountSync = null;
+    clearTimeout(cloudSaveTimer);
+    state.suppressPersist = true;
+    state.levelId = null;
+    state.profile = null;
+    state.answers = [];
+    state.videos = [];
+    state.photo = null;
+    state.partnerId = null;
+    state.quizIndex = 0;
+    state.cloudSynced = false;
+    state.suppressPersist = false;
+  }
+
+  function isLoggedIn() {
+    return !!(state.auth && state.auth.userId);
+  }
+
+  function getAuthClient() {
+    return window.PadelAuth && typeof PadelAuth.getClient === "function" ? PadelAuth.getClient() : null;
+  }
+
+  function persist() {
+    if (state.suppressPersist) return;
+    if (!isLoggedIn()) return;
+    var payload = payloadFromState();
+    writeLocalPayload(payload, STORAGE_KEY);
     if (state.profile && state.levelId) upsertSelf();
+    scheduleCloudSave(payload);
+  }
+
+  var cloudSaveTimer = 0;
+  function scheduleCloudSave(payload) {
+    if (!state.cloudSynced || !isLoggedIn()) return;
+    clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = setTimeout(function () { upsertCloudCard(payload); }, CLOUD_SAVE_MS);
+  }
+
+  function upsertCloudCard(payload) {
+    var client = getAuthClient();
+    var userId = state.auth && state.auth.userId;
+    if (!client || !userId) return Promise.resolve();
+    var card = {
+      levelId: payload.levelId,
+      profile: payload.profile,
+      answers: payload.answers || [],
+      videos: payload.videos || []
+    };
+    return client.from("cards").upsert({
+      user_id: userId,
+      card: card,
+      updated_at: new Date().toISOString()
+    }).then(function (res) {
+      if (res && res.error) {
+        console.warn("cloud upsert", res.error);
+        showToast("השמירה לענן נכשלה. הכרטיס נשמר במכשיר.");
+      }
+      return res;
+    }).catch(function (err) {
+      console.warn("cloud upsert", err);
+      showToast("השמירה לענן נכשלה. הכרטיס נשמר במכשיר.");
+    });
+  }
+
+  function fetchCloudCard() {
+    var client = getAuthClient();
+    var userId = state.auth && state.auth.userId;
+    if (!client || !userId) return Promise.resolve(null);
+    return client.from("cards").select("card, updated_at").eq("user_id", userId).maybeSingle()
+      .then(function (res) {
+        if (res && res.error) {
+          console.warn("cloud fetch", res.error);
+          return { error: res.error, card: null };
+        }
+        var row = res && res.data;
+        return { error: null, card: row && row.card ? row.card : null };
+      }).catch(function (err) {
+        console.warn("cloud fetch", err);
+        return { error: err, card: null };
+      });
+  }
+
+  var accountSync = null;
+  function syncAccount() {
+    if (accountSync) return accountSync;
+    accountSync = fetchCloudCard().then(function (res) {
+      var local = readLegacyLocal();
+      if (res && res.error) {
+        if (local && hasCardPayload(local)) applyPayload(local);
+        showToast("לא הצלחנו לטעון את הכרטיס מהענן.");
+        return;
+      }
+      var cloud = res && res.card;
+      if (cloud && hasCardPayload(cloud)) {
+        if (local && hasCardPayload(local) && payloadsDiffer(local, cloud)) {
+          writeLocalPayload(local, BACKUP_KEY);
+        }
+        applyPayload(cloud);
+        writeLocalPayload(payloadFromState(), STORAGE_KEY);
+      } else if (local && hasCardPayload(local)) {
+        applyPayload(local);
+        return upsertCloudCard(payloadFromState());
+      }
+    }).then(function () {
+      try {
+        var hadPerVideo = state.videos.some(function (v) { return !!v.ai; });
+        migrateLegacyAi();
+        if (!hadPerVideo && state.videos.some(function (v) { return !!v.ai; })) {
+          writeLocalPayload(payloadFromState(), STORAGE_KEY);
+        }
+      } catch (err) { console.warn("ai migrate", err); }
+    }).catch(function (err) {
+      console.warn("account sync", err);
+    }).then(function () {
+      state.cloudSynced = true;
+      accountSync = null;
+    });
+    return accountSync;
   }
 
   function upsertSelf() {
@@ -518,6 +689,20 @@
     }
     if (route === "share" && !state.profile) { state.view = "home"; return; }
     state.view = allowed[route] ? route : "home";
+    gateOwnerViews();
+  }
+
+  function isVisitorView() {
+    return !!(state.publicCard || state.publicPair);
+  }
+
+  function gateOwnerViews() {
+    if (isVisitorView()) return;
+    if (!state.authReady) {
+      state.view = "boot";
+      return;
+    }
+    if (!isLoggedIn()) state.view = "login";
   }
 
   function go(view) {
@@ -3746,8 +3931,9 @@
 
   function render() {
     parseRoute();
-    ["home", "quiz", "result", "profile", "card", "pair", "share", "login"].forEach(function (name) {
-      $("view-" + name).classList.toggle("hidden", state.view !== name);
+    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot"].forEach(function (name) {
+      var el = $("view-" + name);
+      if (el) el.classList.toggle("hidden", state.view !== name);
     });
     if (state.view === "home") renderHome();
     if (state.view === "login" && window.PadelAuth && PadelAuth.render) PadelAuth.render();
@@ -3959,6 +4145,7 @@
   function applyAuthUser(user, meta) {
     var source = (meta && meta.source) || "update";
     if (user && user.id) {
+      var sameUser = state.auth && state.auth.userId === user.id;
       state.auth = {
         userId: user.id,
         email: user.email || "",
@@ -3968,31 +4155,46 @@
         state.profile.authUserId = state.auth.userId;
         state.profile.authEmail = state.auth.email;
       }
-    } else if (source === "sign-out") {
-      state.auth = null;
-      if (state.profile) {
-        delete state.profile.authUserId;
-        delete state.profile.authEmail;
+      if (sameUser && state.cloudSynced && source !== "sign-in") {
+        state.authReady = true;
+        if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+        return;
       }
+      var finish = function () {
+        state.authReady = true;
+        if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+        if (source === "sign-in") {
+          go(state.profile && state.levelId ? "card" : "home");
+        } else {
+          render();
+        }
+      };
+      syncAccount().then(finish).catch(finish);
+      return;
     }
-    persist();
+    if (source === "sign-out") {
+      state.auth = null;
+      clearOwnerFromView();
+    } else {
+      state.auth = null;
+    }
+    state.authReady = true;
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+    if (source === "sign-out") go("home");
+    else render();
   }
 
-  loadSaved();
-  try {
-    var hadPerVideo = state.videos.some(function (v) { return !!v.ai; });
-    migrateLegacyAi();
-    if (!hadPerVideo && state.videos.some(function (v) { return !!v.ai; })) persist();
-  } catch (err) { console.warn("ai migrate", err); }
   bind();
   if (window.PadelAuth) {
     PadelAuth.init({
       onSession: applyAuthUser,
       onToast: showToast,
       go: go,
-      hasCard: function () { return !!(state.profile && state.levelId); }
+      hasCard: function () { return !!(state.profile && state.levelId); },
+      afterSignIn: function () { /* navigation happens after sync in applyAuthUser */ }
     });
+  } else {
+    state.authReady = true;
   }
   render();
 })();

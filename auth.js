@@ -181,7 +181,7 @@
     if (ev) ev.preventDefault();
     showError("auth-error", "");
     if (!isConfigured() || !client) {
-      showError("auth-error", "ההתחברות עדיין לא הוגדרה. אפשר להמשיך בלי להתחבר.");
+      showError("auth-error", "ההתחברות עדיין לא הוגדרה.");
       return;
     }
     var input = $("auth-email");
@@ -240,7 +240,8 @@
         window.__padelAuthUser = user;
         emitSession(user, "sign-in");
         toast("התחברתם בהצלחה");
-        hooks.go(hooks.hasCard && hooks.hasCard() ? "card" : "home");
+        if (typeof hooks.afterSignIn === "function") hooks.afterSignIn(user);
+        else hooks.go(hooks.hasCard && hooks.hasCard() ? "card" : "home");
       } else {
         showError("auth-otp-error", "האימות הצליח, אך לא התקבלה התחברות. נסו שוב.");
       }
@@ -292,7 +293,7 @@
   function signInGoogle() {
     showError("auth-error", "");
     if (!isConfigured() || !client) {
-      showError("auth-error", "ההתחברות עדיין לא הוגדרה. אפשר להמשיך בלי להתחבר.");
+      showError("auth-error", "ההתחברות עדיין לא הוגדרה.");
       return;
     }
     var btn = $("auth-google");
@@ -410,22 +411,31 @@
     bind();
     renderPanel();
 
-    if (!client) return;
+    if (!client) {
+      emitSession(null, "boot");
+      return;
+    }
 
     client.auth.getSession().then(function (res) {
       var user = userFromSession(res && res.data && res.data.session);
-      if (user) {
-        window.__padelAuthUser = user;
-        emitSession(user, "boot");
-      }
+      window.__padelAuthUser = user;
+      emitSession(user, "boot");
       cleanAuthUrl();
       renderPanel();
-    }).catch(function () { cleanAuthUrl(); });
+    }).catch(function () {
+      cleanAuthUrl();
+      window.__padelAuthUser = null;
+      emitSession(null, "boot");
+    });
 
     if (client.auth.onAuthStateChange) {
       client.auth.onAuthStateChange(function (event, session) {
         var user = userFromSession(session);
         window.__padelAuthUser = user;
+        if (event === "INITIAL_SESSION") {
+          renderPanel();
+          return;
+        }
         if (event === "SIGNED_IN") {
           emitSession(user, "sign-in");
           cleanAuthUrl();
@@ -446,6 +456,7 @@
     signOut: signOut,
     showStep: showStep,
     fillOtp: fillOtp,
+    getClient: function () { return client; },
     /* test helpers */
     _otpDigits: otpDigits,
     _beginOtp: beginOtp
