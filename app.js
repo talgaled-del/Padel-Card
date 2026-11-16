@@ -48,7 +48,8 @@
     courts: [],
     photo: null,
     partnerId: null,
-    shareMode: "single"
+    shareMode: "single",
+    auth: null
   };
 
   const $ = function (id) { return document.getElementById(id); };
@@ -74,6 +75,11 @@
       state.videos = (data.videos || []).map(function (v) {
         return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, objectUrl: null, localOnly: !!v.localOnly && !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
       });
+      state.auth = data.auth || null;
+      if (state.profile && state.auth) {
+        state.profile.authUserId = state.auth.userId;
+        state.profile.authEmail = state.auth.email;
+      }
     } catch (err) {
       console.warn("לא ניתן לטעון נתונים שמורים", err);
     }
@@ -100,9 +106,14 @@
       state.profile.photo = state.photo || null;
       state.profile.partnerId = state.partnerId || null;
     }
+    if (state.profile && state.auth) {
+      state.profile.authUserId = state.auth.userId;
+      state.profile.authEmail = state.auth.email;
+    }
     var payload = {
       levelId: state.levelId,
       profile: state.profile,
+      auth: state.auth || null,
       answers: state.answers,
       videos: state.videos.filter(function (v) { return !v.uploading; }).map(function (v) {
         return { id: v.id, name: v.name, link: v.link || "", poster: v.poster || "", duration: v.duration || 0, bytes: v.bytes || 0, localOnly: !v.link, trackUrl: v.trackUrl || "", marker: v.marker || null, track: v.track || null, ai: cleanVideoAi(v.ai, true) };
@@ -498,7 +509,7 @@
     }
 
     var route = parts[0] || "home";
-    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1 };
+    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1 };
     if (route === "result" && !state.levelId) { state.view = "quiz"; return; }
     if (route === "profile" && !state.levelId) { state.view = "quiz"; return; }
     if ((route === "card" || route === "share" || route === "pair") && (!state.profile || !state.levelId)) {
@@ -646,6 +657,7 @@
     var hasCard = !!(state.profile && state.levelId);
     $("home-cta-label").textContent = hasCard ? "קביעת רמה מחדש" : "קביעת רמה והקמת כרטיס";
     $("home-card-btn").classList.toggle("hidden", !hasCard);
+    if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
   }
 
   function renderQuiz() {
@@ -3473,6 +3485,7 @@
     $("copy-pair-from-card").classList.toggle("hidden", !local || !partner);
     $("local-card-actions").classList.toggle("hidden", !local);
     $("open-pair").classList.toggle("hidden", !local || !partner);
+    if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
     var root = $("card-root");
     root.innerHTML = "";
     root.appendChild(createPremiumCard(data, { compact: false, partner: partner, allowReupload: owns }));
@@ -3733,10 +3746,11 @@
 
   function render() {
     parseRoute();
-    ["home", "quiz", "result", "profile", "card", "pair", "share"].forEach(function (name) {
+    ["home", "quiz", "result", "profile", "card", "pair", "share", "login"].forEach(function (name) {
       $("view-" + name).classList.toggle("hidden", state.view !== name);
     });
     if (state.view === "home") renderHome();
+    if (state.view === "login" && window.PadelAuth && PadelAuth.render) PadelAuth.render();
     if (state.view === "quiz") renderQuiz();
     if (state.view === "result") renderResult();
     if (state.view === "profile") fillProfileForm();
@@ -3942,6 +3956,29 @@
     window.addEventListener("hashchange", render);
   }
 
+  function applyAuthUser(user, meta) {
+    var source = (meta && meta.source) || "update";
+    if (user && user.id) {
+      state.auth = {
+        userId: user.id,
+        email: user.email || "",
+        provider: user.provider || "email"
+      };
+      if (state.profile) {
+        state.profile.authUserId = state.auth.userId;
+        state.profile.authEmail = state.auth.email;
+      }
+    } else if (source === "sign-out") {
+      state.auth = null;
+      if (state.profile) {
+        delete state.profile.authUserId;
+        delete state.profile.authEmail;
+      }
+    }
+    persist();
+    if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+  }
+
   loadSaved();
   try {
     var hadPerVideo = state.videos.some(function (v) { return !!v.ai; });
@@ -3949,5 +3986,13 @@
     if (!hadPerVideo && state.videos.some(function (v) { return !!v.ai; })) persist();
   } catch (err) { console.warn("ai migrate", err); }
   bind();
+  if (window.PadelAuth) {
+    PadelAuth.init({
+      onSession: applyAuthUser,
+      onToast: showToast,
+      go: go,
+      hasCard: function () { return !!(state.profile && state.levelId); }
+    });
+  }
   render();
 })();

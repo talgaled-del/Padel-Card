@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v13/styles.css" />
-  <link rel="stylesheet" href="v13/cards.css" />
+  <link rel="stylesheet" href="v14/styles.css" />
+  <link rel="stylesheet" href="v14/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -48,6 +48,11 @@
           <span id="home-cta-label">קביעת רמה והקמת כרטיס</span>
         </button>
         <button class="btn btn-ghost hidden" id="home-card-btn" type="button" style="margin-top:10px">הכרטיס שלי</button>
+        <button class="btn btn-ghost" id="home-login-btn" type="button" style="margin-top:10px">התחברות</button>
+        <div class="auth-status hidden" id="home-auth-status">
+          <p>מחוברים כ־<strong id="home-auth-email" dir="ltr"></strong></p>
+          <button class="btn btn-ghost" id="home-logout-btn" type="button">התנתקות</button>
+        </div>
         <section class="hiw" aria-labelledby="hiw-title">
           <p class="hiw-kicker" id="hiw-title">איך זה עובד</p>
           <ol class="hiw-list">
@@ -276,6 +281,58 @@
       </form>
     </section>
 
+
+    <section id="view-login" class="view hidden">
+      <div class="auth-card">
+        <div id="auth-step-methods">
+          <h1>התחברות</h1>
+          <p class="lede">שומרים את הכרטיס גם אם מחליפים מכשיר. אפשר להמשיך בלי התחברות — הכרטיס נשמר במכשיר הזה.</p>
+          <div class="auth-note hidden" id="auth-unconfigured" role="status">
+            ההתחברות עדיין לא הוגדרה. אפשר להמשיך להשתמש באפליקציה כרגיל, והכרטיס יישמר במכשיר.
+          </div>
+          <p class="auth-error hidden" id="auth-error" role="alert"></p>
+          <button class="btn btn-google" id="auth-google" type="button">
+            <svg class="google-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path fill="#4285F4" d="M23.49 12.27c0-.85-.07-1.48-.22-2.13H12.24v3.87h6.48c-.13 1.07-.84 2.68-2.42 3.76l-.02.15 3.52 2.72.24.02c2.24-2.07 3.53-5.12 3.53-8.39z"/>
+              <path fill="#34A853" d="M12.24 24c3.24 0 5.96-1.07 7.95-2.91l-3.79-2.93c-1.01.7-2.37 1.19-4.16 1.19-3.18 0-5.88-2.09-6.84-4.99l-.14.01-3.7 2.87-.05.14C3.48 21.53 7.56 24 12.24 24z"/>
+              <path fill="#FBBC05" d="M5.4 14.36A7.2 7.2 0 0 1 5 12c0-.82.15-1.61.38-2.36l-.01-.16-3.75-2.91-.12.06A11.97 11.97 0 0 0 .24 12c0 1.94.47 3.77 1.26 5.37l3.9-3.01z"/>
+              <path fill="#EA4335" d="M12.24 4.75c2.25 0 3.77.97 4.64 1.78l3.39-3.31C18.19 1.19 15.48 0 12.24 0 7.56 0 3.48 2.47 1.51 6.15l3.87 3.01c.96-2.9 3.66-4.99 6.86-4.99z"/>
+            </svg>
+            המשך עם Google
+          </button>
+          <div class="auth-divider"><span>או עם אימייל</span></div>
+          <form id="auth-email-form" class="auth-form">
+            <div class="field">
+              <label for="auth-email">אימייל</label>
+              <input id="auth-email" name="email" type="email" inputmode="email" autocomplete="email" dir="ltr" required placeholder="you@email.com" />
+            </div>
+            <button class="btn btn-primary" id="auth-email-submit" type="submit">שליחת קוד לאימייל</button>
+          </form>
+          <button class="btn btn-ghost" id="auth-back-home" type="button">חזרה</button>
+        </div>
+
+        <div id="auth-step-otp" class="hidden">
+          <h1>הזינו את הקוד</h1>
+          <p class="lede">שלחנו קוד בן 6 ספרות אל <strong id="auth-otp-email" dir="ltr"></strong></p>
+          <p class="auth-error hidden" id="auth-otp-error" role="alert"></p>
+          <form id="auth-otp-form" class="auth-form">
+            <div class="otp-boxes" id="otp-boxes" dir="ltr" role="group" aria-label="קוד בן 6 ספרות">
+              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" aria-label="ספרה 1" data-otp-index="0" />
+              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 2" data-otp-index="1" />
+              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 3" data-otp-index="2" />
+              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 4" data-otp-index="3" />
+              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 5" data-otp-index="4" />
+              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 6" data-otp-index="5" />
+            </div>
+            <button class="btn btn-ghost" id="auth-otp-paste" type="button">הדבק קוד</button>
+            <button class="btn btn-primary" id="auth-otp-submit" type="submit">אימות</button>
+          </form>
+          <button class="btn btn-ghost" id="auth-otp-resend" type="button">שליחה מחדש</button>
+          <button class="btn btn-ghost" id="auth-otp-back" type="button">חזרה</button>
+        </div>
+      </div>
+    </section>
+
     <section id="view-card" class="view hidden">
       <div id="card-root"></div>
       <div class="ut-owner-bar hidden" id="owner-actions">
@@ -291,6 +348,7 @@
             <button class="btn btn-ghost" id="edit-profile" type="button">עריכת פרטים</button>
             <button class="btn btn-ghost" id="retake-quiz" type="button">קביעת רמה מחדש</button>
           </div>
+          <button class="btn btn-ghost hidden" id="owner-logout" type="button">התנתקות</button>
         </div>
       </div>
     </section>
@@ -394,9 +452,12 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
-  <script src="v13/quiz.js"></script>
-  <script src="v13/players.js"></script>
-  <script src="v13/track.js"></script>
-  <script src="v13/app.js"></script>
+  <script src="v14/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
+  <script src="v14/quiz.js"></script>
+  <script src="v14/players.js"></script>
+  <script src="v14/track.js"></script>
+  <script src="v14/auth.js"></script>
+  <script src="v14/app.js"></script>
 </body>
 </html>

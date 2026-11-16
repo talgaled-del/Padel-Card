@@ -5,7 +5,7 @@
 ## הרצה מקומית
 
 ```bash
-python3 -m http.server 8765 --directory /workspace/padel-card
+python3 -m http.server 8765 --directory /workspace/padel-card-v14
 ```
 
 פתיחה: http://127.0.0.1:8765/
@@ -14,7 +14,7 @@ python3 -m http.server 8765 --directory /workspace/padel-card
 
 לא לפרוס לציבור — זה אבטיפוס בלבד.
 
-הנכסים הסטטיים נטענים מתיקייה `v13/` (למשל `v13/app.js`) כדי לעקוף את מטמון ה-CDN של Render, שמתעלם ממחרוזת `?v=N`. אחרי עדכון, מעתיקים את הקבצים לתיקיית גרסה חדשה ומעדכנים את `index.html`.
+הנכסים הסטטיים נטענים מתיקייה `v14/` (למשל `v14/app.js`) כדי לעקוף את מטמון ה-CDN של Render, שמתעלם ממחרוזת `?v=N`. אחרי עדכון, מעתיקים את הקבצים לתיקיית גרסה חדשה ומעדכנים את `index.html`.
 
 ## סולם הרמות
 
@@ -34,7 +34,7 @@ D2 (2.0 מתחיל) · D1 (2.5) · C2 (3.0) · C1 (3.5) · B2 (4.0) · B1 (4.5) 
 ### מה צריך לעשות
 1. ב-GitHub, צרו מאגר ריק חדש (מומלץ ציבורי) בשם למשל `padel-card` תחת המשתמש `talgaled-del`.
 2. שלחו את כתובת המאגר (למשל `https://github.com/talgaled-del/padel-card`).
-3. נדחוף את הקבצים מ-`/workspace/padel-card/` ונפרוס Static Site ב-Render לפי `render.yaml`
+3. נדחוף את הקבצים מ-`/workspace/padel-card-v14/` ונפרוס Static Site ב-Render לפי `render.yaml`
    (`buildCommand: true`, `staticPublishPath: ./`).
 
 דמו אחרי הפריסה:
@@ -60,3 +60,22 @@ D2 (2.0 מתחיל) · D1 (2.5) · C2 (3.0) · C1 (3.5) · B2 (4.0) · B1 (4.5) 
 - **תג הרמה למעלה:** פער של רמה אחת בין השאלון ל-AI מוצג כטווח (למשל C1-B2). פער גדול יותר: נשאלים פעם אחת לכל צירוף רמות (`profile.lr`).
 - **דף הבית:** «איך זה עובד». **סרטונים בכרטיס:** אזור מתקפל, סגור כברירת מחדל, זוכר את המצב בסשן.
 - בדיקה: `node scripts/verify-v13.mjs` (שרת mock, ראו הערה בראש הקובץ).
+
+## v14
+
+v13 נשאר כמו שהוא (AI Rating לפי סרטון, פס התקדמות, תג טווח, «איך זה עובד», אזור סרטונים מתקפל), ובנוסף נוספה התחברות רשות עם Supabase.
+
+- Google: `signInWithOAuth` עם `redirectTo` לכתובת האתר.
+- אימייל: `signInWithOtp`, ואז 6 תיבות עם `autocomplete=one-time-code` והדבקה שממלאת את כולן. האימות הוא `verifyOtp` מסוג `email`.
+- בלי התחברות האפליקציה עובדת כמו קודם (כרטיס במכשיר). מבקר שפותח קישור לא נדרש להתחבר.
+- `config.js` כבר ממולא ב-Project URL (`https://ehcsbtbcelfoxfgraytl.supabase.co`) ובמפתח הציבורי `sb_publishable_…` (supabase-js 2.119.0 תומך בפורמט הזה). לא לשים כאן את מפתח ה-service role.
+- הספרייה נטענת מ-CDN בגרסה קבועה: `https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0`
+- בדיקה: `node scripts/verify-v14.mjs` (רגרסיית v13 מול שרת mock) ו-`node scripts/verify-v14-auth.mjs` (מסך התחברות + בקשת OTP אמיתית ל-Supabase).
+
+### הגדרות שעדיין צריך ב-Supabase (אם לא הושלמו)
+
+1. **Authentication → URL Configuration**
+   - **Site URL:** `https://padel-card.onrender.com`
+   - **Redirect URLs:** `https://padel-card.onrender.com`, `https://padel-card.onrender.com/**`, ולבדיקות מקומיות `http://127.0.0.1:8765` / `http://localhost:8765` (או הפורט שבו מריצים).
+2. **Email OTP:** Authentication → Providers → Email — הספק מופעל. מומלץ לכבות Confirm email באבטיפוס. בתבנית המייל (Magic Link / OTP) חייב להופיע `{{ .Token }}`, לא רק קישור.
+3. **Google:** ב-Google Cloud צרו OAuth client (Web application). Authorized JavaScript origins: `https://padel-card.onrender.com` ו-`http://127.0.0.1:8765`. Authorized redirect URI חייב להיות של Supabase: `https://ehcsbtbcelfoxfgraytl.supabase.co/auth/v1/callback`. ב-Supabase: Authentication → Providers → Google — הדביקו Client ID ו-Secret.
