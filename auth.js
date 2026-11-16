@@ -332,16 +332,24 @@
 
   function signOut() {
     var done = function () {
+      // A newer sign-in may have completed while this sign-out was finishing.
+      if (window.__padelAuthUser) return;
       window.__padelAuthUser = null;
       emitSession(null, "sign-out");
       toast("התנתקתם");
       hooks.go("home");
     };
     if (client && client.auth && client.auth.signOut) {
-      client.auth.signOut().then(done).catch(done);
-    } else {
-      done();
+      return client.auth.signOut().then(function () {
+        if (window.__padelAuthUser) return;
+        done();
+      }).catch(function () {
+        if (window.__padelAuthUser) return;
+        done();
+      });
     }
+    done();
+    return Promise.resolve();
   }
 
   function bindOtpBoxes() {
@@ -449,17 +457,38 @@
     if (client.auth.onAuthStateChange) {
       client.auth.onAuthStateChange(function (event, session) {
         var user = userFromSession(session);
-        window.__padelAuthUser = user;
         if (event === "INITIAL_SESSION") {
+          window.__padelAuthUser = user;
           renderPanel();
           return;
         }
         if (event === "SIGNED_IN") {
+          window.__padelAuthUser = user;
           emitSession(user, "sign-in");
           cleanAuthUrl();
-        } else if (event === "SIGNED_OUT") {
-          emitSession(null, "sign-out");
-        } else if (user) {
+          renderPanel();
+          return;
+        }
+        if (event === "SIGNED_OUT") {
+          client.auth.getSession().then(function (res) {
+            var live = userFromSession(res && res.data && res.data.session);
+            if (live) {
+              window.__padelAuthUser = live;
+              return;
+            }
+            window.__padelAuthUser = null;
+            emitSession(null, "sign-out");
+            renderPanel();
+          }).catch(function () {
+            if (window.__padelAuthUser) return;
+            window.__padelAuthUser = null;
+            emitSession(null, "sign-out");
+            renderPanel();
+          });
+          return;
+        }
+        if (user) {
+          window.__padelAuthUser = user;
           emitSession(user, "update");
         }
         renderPanel();

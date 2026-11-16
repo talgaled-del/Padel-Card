@@ -264,14 +264,45 @@
       });
   }
 
+  function localPayloadOwner(data) {
+    if (!data) return { userId: "", email: "" };
+    var profile = data.profile || {};
+    var auth = data.auth || {};
+    return {
+      userId: profile.authUserId || auth.userId || "",
+      email: String(profile.authEmail || auth.email || "").toLowerCase()
+    };
+  }
+
+  function localBelongsToSomeoneElse(data) {
+    if (!isLoggedIn() || !hasCardPayload(data)) return false;
+    var owner = localPayloadOwner(data);
+    var uid = state.auth.userId;
+    var em = String(state.auth.email || "").toLowerCase();
+    if (owner.userId && uid && owner.userId !== uid) return true;
+    if (owner.email && em && owner.email !== em) return true;
+    return false;
+  }
+
+  function stampLocalCardForSignOut() {
+    if (!state.profile || !state.auth) return;
+    writeLocalPayload(payloadFromState(), STORAGE_KEY);
+  }
+
   var accountSync = null;
   function syncAccount() {
     if (accountSync) return accountSync;
     accountSync = fetchCloudCard().then(function (res) {
       var local = readLegacyLocal();
+      var foreignLocal = localBelongsToSomeoneElse(local);
+      if (foreignLocal) {
+        writeLocalPayload(local, BACKUP_KEY);
+        local = null;
+      }
       if (res && res.error) {
         if (local && hasCardPayload(local)) applyPayload(local);
-        showToast("לא הצלחנו לטעון את הכרטיס מהענן.");
+        else if (foreignLocal) showToast("הכרטיס השמור במכשיר שייך לחשבון אחר, ולכן לא נטען.");
+        if (!foreignLocal) showToast("לא הצלחנו לטעון את הכרטיס מהענן.");
         return;
       }
       var cloud = res && res.card;
@@ -284,6 +315,8 @@
       } else if (local && hasCardPayload(local)) {
         applyPayload(local);
         return upsertCloudCard(payloadFromState());
+      } else if (foreignLocal) {
+        showToast("הכרטיס השמור במכשיר שייך לחשבון אחר, ולכן לא נטען לחשבון הזה.");
       }
     }).then(function () {
       try {
@@ -657,6 +690,8 @@
     state.adminPreview = false;
     state.adminViewUserId = null;
     state.adminPreviewId = null;
+    var keepRateCard = parts[0] === "rate" && parts[1] && state.rateRequestId === parts[1] && state.publicCard;
+    var keptRateCard = keepRateCard ? state.publicCard : null;
     state.publicCard = null;
     state.publicPair = null;
 
@@ -720,8 +755,17 @@
       return;
     }
 
+    if (parts[0] === "rate" && parts[1]) {
+      state.rateRequestId = parts[1];
+      if (keptRateCard) state.publicCard = keptRateCard;
+      state.view = "rate";
+      gateOwnerViews();
+      return;
+    }
+    state.rateRequestId = null;
+
     var route = parts[0] || "home";
-    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1, terms: 1, privacy: 1, copyright: 1 };
+    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1, terms: 1, privacy: 1, copyright: 1, rate: 1 };
     if (route === "result" && !state.levelId) { state.view = "quiz"; return; }
     if (route === "profile" && !state.levelId) { state.view = "quiz"; return; }
     if ((route === "card" || route === "share" || route === "pair") && (!state.profile || !state.levelId)) {
@@ -740,6 +784,11 @@
   function gateOwnerViews() {
     if (isVisitorView()) return;
     if (state.view === "legal") return;
+    if (state.view === "rate") {
+      if (!state.authReady) { state.view = "boot"; return; }
+      if (!isLoggedIn()) { state.view = "login"; return; }
+      return;
+    }
     if (state.view === "admin" || state.view === "admin-view") {
       gateAdminView();
       return;
@@ -857,9 +906,12 @@
   }
 
   function go(view) {
-    if (view === "home") location.hash = "#/";
-    else if (view && view.charAt(0) === "#") location.hash = view;
-    else location.hash = "#/" + view;
+    var next;
+    if (view === "home") next = "#/";
+    else if (view && view.charAt(0) === "#") next = view;
+    else next = "#/" + view;
+    if ((location.hash || "#/") === next) render();
+    else location.hash = next;
   }
 
   function showToast(msg, ms) {
@@ -990,13 +1042,26 @@
     }
   }
 
+  function renderAccountChip() {
+    var chip = $("account-chip");
+    var emailEl = $("account-chip-email");
+    var tag = $("account-chip-rater");
+    var signed = isLoggedIn();
+    if (chip) chip.classList.toggle("hidden", !signed);
+    if (emailEl) emailEl.textContent = signed ? (state.auth.email || "") : "";
+    if (tag) tag.classList.toggle("hidden", !(signed && state.isCertifiedRater));
+  }
+
   function renderHome() {
     var hasCard = !!(state.profile && state.levelId);
     $("home-cta-label").textContent = hasCard ? "קביעת רמה מחדש" : "קביעת רמה והקמת כרטיס";
     $("home-card-btn").classList.toggle("hidden", !hasCard);
+    if ($("req-ask-home-btn")) $("req-ask-home-btn").classList.toggle("hidden", !hasCard);
     if ($("home-admin-btn")) $("home-admin-btn").classList.toggle("hidden", !state.isAdmin);
     if ($("home-certified-badge")) $("home-certified-badge").classList.toggle("hidden", !state.isCertifiedRater);
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+    renderAccountChip();
+    if (window.PadelRequests && isLoggedIn()) PadelRequests.refresh();
   }
 
   function renderQuiz() {
@@ -3844,6 +3909,7 @@
     var local = isLocalLiveCard();
     var partner = local ? linkedPartner() : null;
     $("owner-actions").classList.toggle("hidden", !owns);
+    if ($("req-ask-bar")) $("req-ask-bar").classList.toggle("hidden", !owns);
     $("copy-own-link").classList.toggle("hidden", !owns);
     setWhatsAppShare($("wa-share-own"), owns, owns ? urlToCopyForCard() : "", "single");
     $("copy-pair-from-card").classList.toggle("hidden", !local || !partner);
@@ -3854,6 +3920,9 @@
     root.innerHTML = "";
     root.appendChild(createPremiumCard(data, { compact: false, partner: partner, allowReupload: owns }));
     syncCertifiedRateBar(data, owns);
+    if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+    renderAccountChip();
+    if (window.PadelRequests && isLoggedIn()) PadelRequests.refresh();
     if (owns && aiEligibleVideos(data.videos).length) warmAiServer();
   }
 
@@ -4117,9 +4186,49 @@
     location.href = "https://wa.me/?text=" + encodeURIComponent(shareMessage(url));
   }
 
+
+  function openRateRequest() {
+    var id = state.rateRequestId;
+    if (!id) { go("home"); return; }
+    if (state.rateLoadedId === id && state.publicCard) {
+      renderCard();
+      return;
+    }
+    if (state.rateLoadingId === id) return;
+    var root = $("card-root");
+    if (root && !state.publicCard) root.innerHTML = '<p class="lede">טוענים את בקשת הדירוג…</p>';
+    var c = getAuthClient();
+    if (!c) { showToast("יש להתחבר כדי לדרג"); go("login"); return; }
+    state.rateLoadingId = id;
+    c.rpc("get_card_for_rating_request", { p_id: id }).then(function (res) {
+      if (res.error) throw res.error;
+      var payload = res.data || {};
+      var card = cardFromCloudPayload(payload.card);
+      if (!card) throw new Error("card not found");
+      state.publicCard = card;
+      state.rateRequestStatus = payload.status;
+      state.rateLoadedId = id;
+      state.rateLoadingId = null;
+      renderCard();
+      if (payload.status === "pending" && state.rateSheetOpenedFor !== id) {
+        state.rateSheetOpenedFor = id;
+        setTimeout(function () {
+          if (window.PadelCertified) PadelCertified.openSheet(card);
+        }, 300);
+      } else if (payload.status !== "pending") {
+        showToast(payload.status === "done" ? "הבקשה כבר דורגה" : "הבקשה אינה ממתינה");
+      }
+    }).catch(function (err) {
+      if (state.rateLoadingId === id) state.rateLoadingId = null;
+      var msg = (window.PadelRequests && PadelRequests.hebrewError(err)) || "לא ניתן לטעון את הבקשה";
+      showToast(msg);
+      go("home");
+    });
+  }
+
   function render() {
     parseRoute();
-    var visual = state.view === "admin-view" ? "card" : state.view;
+    var visual = (state.view === "admin-view" || state.view === "rate") ? "card" : state.view;
     ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot", "admin", "unavailable", "legal"].forEach(function (name) {
       var el = $("view-" + name);
       if (el) el.classList.toggle("hidden", visual !== name);
@@ -4133,6 +4242,7 @@
     if (state.view === "quiz") renderQuiz();
     if (state.view === "result") renderResult();
     if (state.view === "profile") fillProfileForm();
+    if (state.view === "rate") openRateRequest();
     if (state.view === "card" || state.view === "admin-view") {
       if (state.view === "admin-view") openAdminCardPreview();
       else renderCard();
@@ -4142,6 +4252,7 @@
     if (state.view === "admin" && window.PadelAdmin && PadelAdmin.render) PadelAdmin.render();
     if (state.view === "legal" && window.PadelLegal && PadelLegal.renderPage) PadelLegal.renderPage();
     if (window.PadelLegal && PadelLegal.renderChrome) PadelLegal.renderChrome(state);
+    renderAccountChip();
     var showcase = visual === "card" || visual === "pair";
     document.body.classList.toggle("mode-showcase", showcase);
     document.body.classList.remove("has-dock");
@@ -4373,7 +4484,19 @@
         if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
         return;
       }
+      var signedUser = user;
       var finish = function () {
+        if (!state.auth || state.auth.userId !== signedUser.id) {
+          if (window.__padelAuthUser && window.__padelAuthUser.id === signedUser.id) {
+            state.auth = {
+              userId: signedUser.id,
+              email: signedUser.email || "",
+              provider: signedUser.provider || "email"
+            };
+          } else {
+            return;
+          }
+        }
         loadAccountFlags().then(function (flags) {
           if (flags && flags.disabled) {
             state.disabledNotice = true;
@@ -4395,8 +4518,9 @@
             var hash = (location.hash || "").replace(/^#\/?/, "");
             var wantsAdmin = hash.indexOf("admin") === 0;
             var onLegal = hash === "terms" || hash === "privacy" || hash === "copyright";
+            var onRate = hash.indexOf("rate/") === 0;
             if (source === "sign-in") {
-              if (onLegal) render();
+              if (onLegal || onRate) render();
               else if (wantsAdmin && state.isAdmin) go("admin");
               else go(state.profile && state.levelId ? "card" : "home");
             } else {
@@ -4413,7 +4537,30 @@
       syncAccount().then(finish).catch(finish);
       return;
     }
+    var client = getAuthClient();
+    if (client && client.auth && client.auth.getSession) {
+      client.auth.getSession().then(function (res) {
+        var session = res && res.data && res.data.session;
+        var live = session && session.user;
+        if (live && live.id) {
+          applyAuthUser({
+            id: live.id,
+            email: live.email || "",
+            provider: (live.app_metadata && live.app_metadata.provider) || "email"
+          }, { source: "update" });
+          return;
+        }
+        finalizeSignOut(source);
+      }).catch(function () { finalizeSignOut(source); });
+      return;
+    }
+    finalizeSignOut(source);
+  }
+
+  function finalizeSignOut(source) {
+    if (window.__padelAuthUser && window.__padelAuthUser.id) return;
     if (source === "sign-out") {
+      stampLocalCardForSignOut();
       state.auth = null;
       state.isAdmin = false;
       clearCertifiedFlags();
@@ -4481,9 +4628,31 @@
           ownCardId: ownCardId()
         };
       },
+      onChanged: function (cardId) {
+        if (window.PadelRequests && PadelRequests.cached) {
+          var inbox = (PadelRequests.cached().inbox || []).filter(function (r) {
+            return r.status === "pending" && r.card_id === cardId;
+          });
+          if (inbox.length && inbox[0].id) PadelRequests.notify(inbox[0].id, "done");
+        }
+        if (window.PadelRequests) PadelRequests.refresh();
+        if (state.view === "card" || state.view === "rate") renderCard();
+        else if (state.view === "pair") renderPair();
+        else if (state.view === "home") renderHome();
+      }
+    });
+  }
+  if (window.PadelRequests) {
+    PadelRequests.init({
+      showToast: showToast,
+      cardId: function () { return ownCardId() || shareCardId(currentCardData()); },
+      hasCard: function () { return !!(state.profile && state.levelId); },
+      isRater: function () { return !!state.isCertifiedRater; },
+      go: go,
+      onOpenRate: function (requestId) { go("rate/" + requestId); },
       onChanged: function () {
         if (state.view === "card") renderCard();
-        else if (state.view === "pair") renderPair();
+        else if (state.view === "home") renderHome();
       }
     });
   }

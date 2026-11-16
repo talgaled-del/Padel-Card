@@ -52,6 +52,7 @@
     if (/invalid name/.test(m)) return "יש להזין שם מלא.";
     if (/rater not found/.test(m)) return "המוסמך לא נמצא.";
     if (/rating not found/.test(m)) return "הדירוג לא נמצא.";
+    if (/cannot assign admin email/.test(m)) return "אי אפשר לשייך למוסמך את האימייל של חשבון מנהל.";
     return raw ? ("שגיאה: " + raw) : "משהו השתבש.";
   }
 
@@ -113,7 +114,8 @@
       rpc("admin_list_users", { p_search: search, p_sort: sort }),
       rpc("admin_list_actions"),
       rpc("admin_list_certified_raters"),
-      rpc("admin_list_certified_ratings")
+      rpc("admin_list_certified_ratings"),
+      rpc("admin_list_rating_requests")
     ]).then(function (parts) {
       cache.stats = parts[0] || {};
       cache.users = (parts[1] && parts[1].users) || [];
@@ -121,6 +123,7 @@
       cache.actions = parts[2] || [];
       cache.raters = parts[3] || [];
       cache.certRatings = parts[4] || [];
+      cache.reqAdmin = parts[5] || { counts: {}, requests: [] };
       paint();
     });
   }
@@ -212,6 +215,42 @@
     paintTabs();
     paintRaters();
     paintCertRatings();
+    paintRequests();
+  }
+
+  function paintRequests() {
+    var countsEl = $("admin-req-counts");
+    var listEl = $("admin-req-list");
+    if (!countsEl && !listEl) return;
+    var data = cache.reqAdmin || {};
+    var counts = data.counts || {};
+    var labels = [
+      ["pending", "ממתינות"],
+      ["done", "דורגו"],
+      ["declined", "נדחו"],
+      ["cancelled", "בוטלו"],
+      ["total", "סה״כ"]
+    ];
+    if (countsEl) {
+      countsEl.innerHTML = labels.map(function (pair) {
+        return '<span class="admin-chip"><b>' + pair[1] + "</b> " + escapeHtml(String(counts[pair[0]] || 0)) + "</span>";
+      }).join("");
+    }
+    if (!listEl) return;
+    var list = data.requests || [];
+    if (!list.length) {
+      listEl.innerHTML = '<p class="admin-empty">עדיין אין בקשות דירוג.</p>';
+      return;
+    }
+    listEl.innerHTML = '<ol class="admin-log-list">' + list.map(function (r) {
+      var st = r.status === "pending" ? "ממתין" : r.status === "done" ? "דורג" : r.status === "declined" ? "נדחה" : "בוטל";
+      return "<li><div class=\"admin-cert-rating-top\">" +
+        '<span class="req-status">' + escapeHtml(st) + "</span>" +
+        "<span>" + escapeHtml(r.player_name || r.card_id || "שחקן") + " → " + escapeHtml(r.rater_name || "מוסמך") + "</span>" +
+        "</div>" +
+        '<span class="admin-log-meta">' + escapeHtml(fmtDate(r.created_at)) +
+        (r.message ? " · " + escapeHtml(r.message) : "") + "</span></li>";
+    }).join("") + "</ol>";
   }
 
   function paintTabs() {
@@ -351,8 +390,44 @@
       hooks.showToast("יש להקליד את כתובת האימייל לאישור.");
       return;
     }
+    if (opts.act === "cert-email-warn" && typeof opts.onConfirm === "function") {
+      var fn = opts.onConfirm;
+      closeDialog();
+      fn();
+      return;
+    }
     var user = opts.user;
     var rater = opts.rater;
+    if (opts.previewEmail && typed) {
+      rpc("admin_preview_rater_email", { p_email: typed }).then(function (info) {
+        info = info || {};
+        if (info.is_admin) {
+          hooks.showToast("אי אפשר לשייך למוסמך את האימייל של חשבון מנהל.");
+          return;
+        }
+        if (info.has_account || info.has_card) {
+          var proceed = Object.assign({}, opts, { previewEmail: false });
+          openDialog({
+            act: "cert-email-warn",
+            onConfirm: function () {
+              pendingDialog = proceed;
+              confirmAction();
+            },
+            title: "האימייל כבר שייך לחשבון",
+            text: info.has_card
+              ? "לאימייל הזה כבר יש חשבון וכרטיס שחקן. שיוך למוסמך יוסיף את הרשאת הדירוג לאותו חשבון, ולא ייצור כרטיס חדש."
+              : "לאימייל הזה כבר יש חשבון באתר. שיוך למוסמך יאפשר לאותו חשבון לדרג.",
+            yesLabel: "המשך לשיוך"
+          });
+          return;
+        }
+        pendingDialog = Object.assign({}, opts, { previewEmail: false });
+        confirmAction();
+      }).catch(function (err) {
+        hooks.showToast(hebrewError(err));
+      });
+      return;
+    }
     closeDialog();
     setBusy(true);
     var work;
@@ -389,9 +464,10 @@
         emailValue: rater.email || "",
         fieldLabel: "כתובת האימייל לשיוך",
         title: "שיוך אימייל",
-        text: "עם אימייל משויך, " + (rater.full_name || "המוסמך") + " יוכל לדרג כרטיסים אחרי התחברות.",
+        text: "עם אימייל משויך, " + (rater.full_name || "המוסמך") + " יוכל לדרג כרטיסים אחרי התחברות. השיוך הוא לחשבון הקיים של אותו אימייל, אם יש כזה.",
         yesLabel: "שמירה",
-        doneToast: "האימייל עודכן"
+        doneToast: "האימייל עודכן",
+        previewEmail: true
       });
       return;
     }
@@ -445,6 +521,34 @@
     });
   }
 
+  function confirmEmailAssignment(email, onOk) {
+    var em = (email || "").trim();
+    if (!em) { onOk(); return; }
+    rpc("admin_preview_rater_email", { p_email: em }).then(function (info) {
+      info = info || {};
+      if (info.is_admin) {
+        hooks.showToast("אי אפשר לשייך למוסמך את האימייל של חשבון מנהל.");
+        return;
+      }
+      if (info.has_account || info.has_card) {
+        openDialog({
+          act: "cert-email-warn",
+          onConfirm: onOk,
+          title: "האימייל כבר שייך לחשבון",
+          text: info.has_card
+            ? "לאימייל הזה כבר יש חשבון וכרטיס שחקן. שיוך למוסמך יוסיף את הרשאת הדירוג לאותו חשבון, ולא ייצור כרטיס חדש."
+            : "לאימייל הזה כבר יש חשבון באתר. שיוך למוסמך יאפשר לאותו חשבון לדרג.",
+          yesLabel: "המשך לשיוך",
+          doneToast: ""
+        });
+        return;
+      }
+      onOk();
+    }).catch(function (err) {
+      hooks.showToast(hebrewError(err));
+    });
+  }
+
   function addRaterFromForm() {
     var nameEl = $("admin-rater-name");
     var emailEl = $("admin-rater-email");
@@ -454,6 +558,7 @@
       hooks.showToast("יש להזין שם מלא.");
       return;
     }
+    var doAdd = function () {
     setBusy(true);
     rpc("admin_add_certified_rater", { p_full_name: name, p_email: email || null }).then(function () {
       if (nameEl) nameEl.value = "";
@@ -464,6 +569,8 @@
       setBusy(false);
       hooks.showToast(hebrewError(err));
     });
+    };
+    confirmEmailAssignment(email, doAdd);
   }
 
   function onUserAction(act, userId) {

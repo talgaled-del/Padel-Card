@@ -221,9 +221,13 @@ export async function cleanupCertifiedTestData() {
   const raters = Array.isArray(ratersRes.body) ? ratersRes.body : [];
   const testRaters = raters.filter((r) => {
     const email = String(r && r.email || "").toLowerCase();
-    return email.endsWith("@example.com") && /padel\.test/.test(email);
+    const name = String(r && r.full_name || "");
+    if (email.endsWith("@example.com") && /padel\.test/.test(email)) return true;
+    if (/v20|בדיקה/.test(name) && !/עמית נאור|אהרון|דניאל|נועם|סער|עמית שחר/.test(name)) return true;
+    return false;
   });
   for (const r of testRaters) {
+    await adminFetch("/rest/v1/rating_requests?rater_id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
     await adminFetch("/rest/v1/certified_ratings?rater_id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
     await adminFetch("/rest/v1/certified_raters?id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
   }

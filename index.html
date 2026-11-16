@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v19/styles.css" />
-  <link rel="stylesheet" href="v19/cards.css" />
+  <link rel="stylesheet" href="v20/styles.css" />
+  <link rel="stylesheet" href="v20/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -30,6 +30,10 @@
           <span>לשליחה בקבוצת הוואטסאפ</span>
         </span>
       </a>
+      <div class="account-chip hidden" id="account-chip">
+        <span class="account-chip-email" id="account-chip-email" dir="ltr"></span>
+        <span class="account-chip-tag hidden" id="account-chip-rater">מוסמך דירוג ⭐</span>
+      </div>
     </header>
 
     <section id="view-home" class="view">
@@ -48,6 +52,7 @@
           <span id="home-cta-label">קביעת רמה והקמת כרטיס</span>
         </button>
         <button class="btn btn-ghost hidden" id="home-card-btn" type="button" style="margin-top:10px">הכרטיס שלי</button>
+        <button class="btn btn-star-ghost hidden" id="req-ask-home-btn" type="button" style="margin-top:10px">בקש דירוג כוכב ⭐</button>
         <button class="btn btn-ghost hidden" id="home-admin-btn" type="button" style="margin-top:10px">ניהול משתמשים</button>
         <button class="btn btn-ghost" id="home-login-btn" type="button" style="margin-top:10px">התחברות</button>
         <div class="auth-status hidden" id="home-auth-status">
@@ -55,6 +60,8 @@
           <p class="home-certified-badge hidden" id="home-certified-badge">אתה מוסמך דירוג ⭐</p>
           <button class="btn btn-ghost" id="home-logout-btn" type="button">התנתקות</button>
         </div>
+        <div id="req-inbox" class="hidden"></div>
+        <div id="req-mine-home" class="hidden"></div>
         <section class="hiw" aria-labelledby="hiw-title">
           <p class="hiw-kicker" id="hiw-title">איך זה עובד</p>
           <ol class="hiw-list">
@@ -464,6 +471,11 @@
             <h2 id="admin-cert-log-title">דירוגים אחרונים</h2>
             <div id="admin-cert-ratings"></div>
           </section>
+          <section class="admin-log" aria-labelledby="admin-req-title">
+            <h2 id="admin-req-title">בקשות דירוג</h2>
+            <div id="admin-req-counts" class="admin-req-counts"></div>
+            <div id="admin-req-list"></div>
+          </section>
         </div>
       </div>
     </section>
@@ -501,6 +513,10 @@
       <div class="ut-owner-bar certified-rate-bar hidden" id="certified-rate-bar">
         <button class="btn btn-star" id="certified-rate-btn" type="button">דרג כמוסמך ⭐</button>
       </div>
+      <div class="ut-owner-bar hidden" id="req-ask-bar">
+        <button class="btn btn-star" id="req-ask-btn" type="button">בקש דירוג כוכב ⭐</button>
+      </div>
+      <div id="req-mine" class="hidden"></div>
       <div class="ut-owner-bar hidden" id="owner-actions">
         <button class="btn btn-primary" id="copy-own-link" type="button">העתק קישור</button>
         <a class="btn btn-whatsapp hidden" id="wa-share-own" href="https://wa.me/" target="_blank" rel="noopener">
@@ -710,15 +726,30 @@
       <button type="button" class="text-btn certified-remove hidden" id="certified-sheet-remove">הסרת הדירוג שלי</button>
     </div>
   </div>
-  <script src="v19/config.js"></script>
+
+  <div id="req-picker" class="req-picker hidden" role="dialog" aria-modal="true" aria-labelledby="req-picker-title">
+    <div class="req-picker-card">
+      <h2 id="req-picker-title">בקש דירוג כוכב ⭐</h2>
+      <p class="lede">בחרו מוסמך אחד או יותר. נשלח אליהם מייל עם קישור לכרטיס שלכם.</p>
+      <div id="req-picker-list" class="req-rater-list"></div>
+      <label class="certified-note-label" for="req-picker-msg">הודעה (לא חובה)</label>
+      <textarea id="req-picker-msg" maxlength="200" rows="3" placeholder="למשל: נשמח לחוות דעת אחרי אימון משותף."></textarea>
+      <div class="btn-row two" style="margin-top:14px">
+        <button type="button" class="btn btn-ghost" id="req-picker-cancel">ביטול</button>
+        <button type="button" class="btn btn-primary" id="req-picker-send">שליחת בקשה</button>
+      </div>
+    </div>
+  </div>
+  <script src="v20/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
-  <script src="v19/quiz.js"></script>
-  <script src="v19/players.js"></script>
-  <script src="v19/track.js"></script>
-  <script src="v19/auth.js"></script>
-  <script src="v19/admin.js"></script>
-  <script src="v19/legal.js"></script>
-  <script src="v19/certified.js"></script>
-  <script src="v19/app.js"></script>
+  <script src="v20/quiz.js"></script>
+  <script src="v20/players.js"></script>
+  <script src="v20/track.js"></script>
+  <script src="v20/auth.js"></script>
+  <script src="v20/admin.js"></script>
+  <script src="v20/legal.js"></script>
+  <script src="v20/certified.js"></script>
+  <script src="v20/requests.js"></script>
+  <script src="v20/app.js"></script>
 </body>
 </html>
