@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v17/styles.css" />
-  <link rel="stylesheet" href="v17/cards.css" />
+  <link rel="stylesheet" href="v18/styles.css" />
+  <link rel="stylesheet" href="v18/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -265,6 +265,27 @@
           <span class="legend">סרטוני משחק</span>
           <p class="note">העלו סרטון משחק מהגלריה או מהמצלמה (עד 3 סרטונים, עד 100MB ו־3 דקות לכל אחד). אחרי ההעלאה תתבקשו לסמן את עצמכם בסרטון, כדי שהמארגן יידע על מי להתמקד. אפשר גם להוסיף קישור חיצוני.</p>
           <p class="note legal-media-note">בהעלאה אתם מאשרים שיש לכם זכויות בסרטון, ושאנשים שמופיעים בו הסכימו להופיע בו ולשיתוף בכרטיס.</p>
+
+          <aside class="vid-tips" id="vid-tips-profile" aria-label="איך לצלם סרטון שמתאים לסימון ולדירוג AI">
+            <div class="vid-tips-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 21v-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                <path d="M8 21h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                <rect x="4.5" y="5.5" width="11.5" height="8.5" rx="2" stroke="currentColor" stroke-width="1.8"/>
+                <path d="m16 8.2 3.2-1.6v6.2L16 11.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="10.2" cy="9.7" r="1.7" stroke="currentColor" stroke-width="1.7"/>
+              </svg>
+            </div>
+            <div class="vid-tips-body">
+              <p class="vid-tips-title">כדי שהמעקב ודירוג ה-AI יצליחו</p>
+              <p class="vid-tips-lead">עיגול הסימון ננעל על המיקום שלכם במגרש. הישארו באותו צד לאורך כל הסרטון.</p>
+              <ul>
+                <li>מצלמה קבועה, על חצובה או גדר</li>
+                <li>אותו צד לאורך כל הסרטון, בלי להחליף עם הפרטנר</li>
+                <li>השחקן נראה במלואו, בלי חיתוך בין זוויות</li>
+              </ul>
+            </div>
+          </aside>
           <label class="upload" for="video-file">
             <input id="video-file" type="file" accept="video/*,video/quicktime,video/mp4,.mov,.mp4,.m4v,.hevc,.MOV,.MP4,.M4V" multiple />
             <strong>העלאת סרטון מהמכשיר</strong>
@@ -546,6 +567,27 @@
     <div class="track-sheet">
       <h2 id="track-picker-title">מי אתם בסרטון?</h2>
       <p class="track-lead">לחצו על עצמכם בתמונה, כדי שהמארגן יידע על מי להתמקד.</p>
+
+      <aside class="vid-tips is-compact" id="vid-tips-picker" aria-label="איך לצלם כדי שהסימון יצליח">
+        <div class="vid-tips-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 21v-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M8 21h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <rect x="4.5" y="5.5" width="11.5" height="8.5" rx="2" stroke="currentColor" stroke-width="1.8"/>
+            <path d="m16 8.2 3.2-1.6v6.2L16 11.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="10.2" cy="9.7" r="1.7" stroke="currentColor" stroke-width="1.7"/>
+          </svg>
+        </div>
+        <div class="vid-tips-body">
+          <p class="vid-tips-title">העיגול ננעל על המיקום שלכם</p>
+          <p class="vid-tips-lead">הישארו באותו צד לאורך כל הסרטון, כדי שהמעקב ודירוג ה-AI לא ייכשלו.</p>
+          <ul>
+            <li>מצלמה קבועה, על חצובה או גדר</li>
+            <li>אותו צד לאורך כל הסרטון</li>
+            <li>השחקן נראה במלואו, בלי מעבר בין זוויות</li>
+          </ul>
+        </div>
+      </aside>
       <div class="track-stage" id="track-picker-stage">
         <img id="track-picker-poster" alt="" class="hidden" />
         <video id="track-picker-video" playsinline muted webkit-playsinline preload="auto"></video>
@@ -619,14 +661,14 @@
   </div>
 
   <div id="toast" class="toast" role="status"></div>
-  <script src="v17/config.js"></script>
+  <script src="v18/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
-  <script src="v17/quiz.js"></script>
-  <script src="v17/players.js"></script>
-  <script src="v17/track.js"></script>
-  <script src="v17/auth.js"></script>
-  <script src="v17/admin.js"></script>
-  <script src="v17/legal.js"></script>
-  <script src="v17/app.js"></script>
+  <script src="v18/quiz.js"></script>
+  <script src="v18/players.js"></script>
+  <script src="v18/track.js"></script>
+  <script src="v18/auth.js"></script>
+  <script src="v18/admin.js"></script>
+  <script src="v18/legal.js"></script>
+  <script src="v18/app.js"></script>
 </body>
 </html>

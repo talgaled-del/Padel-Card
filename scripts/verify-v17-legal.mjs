@@ -160,7 +160,7 @@ try {
     return { ok: !!(data && data.user), error: error && error.message };
   }, user);
   assert(signed2.ok, "re-signin for media test: " + (signed2.error || "ok"));
-  await page2.waitForTimeout(1200);
+  await page2.waitForFunction(() => window.PadelLegal && PadelLegal.hasAccepted && PadelLegal.hasAccepted(), { timeout: 15000 });
   const flags = await page2.evaluate(() => ({
     modal: !document.getElementById("legal-consent-modal").classList.contains("hidden"),
     accepted: window.PadelLegal && PadelLegal.hasAccepted && PadelLegal.hasAccepted()

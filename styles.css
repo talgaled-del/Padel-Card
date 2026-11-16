@@ -1629,3 +1629,78 @@ body.legal-modal-open { overflow: hidden; }
 .legal-pending-bar.hidden { display: none; }
 .legal-pending-bar .btn { width: auto; padding: 8px 12px; }
 body:has(#legal-pending-bar:not(.hidden)) #app { padding-bottom: calc(72px + var(--safe-bottom)); }
+
+/* v18 — video filming tips */
+.vid-tips {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 12px 0 14px;
+  padding: 12px 12px 12px 10px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(46, 224, 176, 0.08), rgba(16, 36, 28, 0.65));
+  border: 1px solid rgba(46, 224, 176, 0.28);
+}
+.vid-tips-icon {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: var(--lime);
+  background: rgba(200, 255, 60, 0.1);
+  border: 1px solid rgba(200, 255, 60, 0.28);
+}
+.vid-tips-icon svg { width: 22px; height: 22px; display: block; }
+.vid-tips-body { min-width: 0; flex: 1; }
+.vid-tips-title {
+  margin: 0 0 4px;
+  font-size: 0.92rem;
+  font-weight: 800;
+  line-height: 1.35;
+  color: var(--text);
+}
+.vid-tips-lead {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+  font-weight: 500;
+}
+.vid-tips ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 5px;
+}
+.vid-tips li {
+  position: relative;
+  padding: 0 16px 0 0;
+  font-size: 0.8rem;
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--text);
+}
+.vid-tips li::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0.55em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lime);
+  box-shadow: 0 0 0 3px rgba(200, 255, 60, 0.16);
+}
+.vid-tips.is-compact {
+  margin: 0 0 12px;
+  padding: 10px 10px 10px 8px;
+  gap: 10px;
+}
+.vid-tips.is-compact .vid-tips-icon { width: 34px; height: 34px; flex-basis: 34px; border-radius: 10px; }
+.vid-tips.is-compact .vid-tips-icon svg { width: 18px; height: 18px; }
+.vid-tips.is-compact .vid-tips-title { font-size: 0.86rem; }
+.vid-tips.is-compact .vid-tips-lead { font-size: 0.76rem; margin-bottom: 6px; }
+.vid-tips.is-compact li { font-size: 0.76rem; }

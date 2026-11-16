@@ -1959,7 +1959,7 @@
     }).then(function (track) {
       if (pickerState.cancelled) return finishPickerWithStatic(v);
       if (!track || !PadelTrack.isUsefulTrack(track)) {
-        return finishPickerWithStatic(v, "לא הצלחנו לעקוב אחרי השחקן לכל אורך הסרטון. נשמר סימון בתחילת הסרטון");
+        return finishPickerWithStatic(v, "לא הצלחנו לעקוב אחרי השחקן לכל אורך הסרטון. לרוב זה קורה כשהמצלמה זזה, כשמתחלף הצד במגרש, או כשיש מעבר בין זוויות. נשמר סימון בתחילת הסרטון");
       }
       setTrackProgress(true, 1, "שומר את הסימון…");
       var packed = PadelTrack.pack(track);
@@ -1973,7 +1973,7 @@
         showToast("השחקן סומן בסרטון");
       });
     }, function (err) {
-      var msg = "לא הצלחנו לזהות את השחקן. נשמר סימון בנקודה שנבחרה";
+      var msg = "לא הצלחנו לזהות את השחקן לכל אורך הסרטון. לרוב זה קורה כשהמצלמה זזה או כשמתחלף הצד במגרש. נשמר סימון בנקודה שנבחרה";
       if (err && err.code === "tainted") {
         msg = "לא ניתן לקרוא את פיקסלי הסרטון. נשמר סימון בתחילת הסרטון";
       }
@@ -3628,7 +3628,7 @@
       return res.json().catch(function () { return {}; }).then(function (json) {
         if (!res.ok || !json || !json.level) {
           var e = new Error(json && json.error || "http-" + res.status);
-          e.userMessage = (json && json.message) || "ניתוח ה-AI נכשל";
+          e.userMessage = (json && json.message) || "ניתוח ה-AI נכשל. ודאו שהמצלמה הייתה קבועה ושהשחקן נשאר באותו צד לאורך הסרטון";
           e.code = json && json.error;
           throw e;
         }
@@ -3698,11 +3698,13 @@
       var failed = queued.length - ok;
       aiRun.running = false;
       aiRun.summary = failed
-        ? (ok ? ok + " נותחו, " + failed + " נכשלו. אפשר לנסות שוב את מה שנכשל." : "הניתוח נכשל. נסו שוב.")
+        ? (ok
+          ? ok + " נותחו, " + failed + " נכשלו. אפשר לנסות שוב את מה שנכשל. אם נכשל, בדקו שהמצלמה הייתה קבועה ושהשחקן נשאר באותו צד."
+          : "הניתוח נכשל. נסו שוב. ודאו שהמצלמה הייתה קבועה ושהשחקן נשאר באותו צד לאורך הסרטון.")
         : (queued.length === 1 ? "הסרטון נותח והדירוג עודכן." : queued.length + " סרטונים נותחו והדירוג עודכן.");
       if (ok) aiState.justRated = true;
       var firstErr = queued.filter(function (it) { return it.status === "failed"; })[0];
-      if (failed) showToast(firstErr && firstErr.error ? firstErr.error + (ok ? " · " + ok + " סרטונים נותחו" : "") : "ניתוח ה-AI נכשל. נסו שוב", 4500);
+      if (failed) showToast(firstErr && firstErr.error ? firstErr.error + (ok ? " · " + ok + " סרטונים נותחו" : "") : "ניתוח ה-AI נכשל. ודאו שהמצלמה הייתה קבועה ושהשחקן נשאר באותו צד. נסו שוב", 5200);
       else showToast("ה-AI Rating עודכן. שתפו שוב את הקישור כדי שכולם יראו", 4000);
     }).catch(function (err) {
       aiRun.running = false;

@@ -252,7 +252,7 @@ async function waitRunDone(page) {
   assert(/נתח סרטונים חדשים \(2\)/.test(await text(page, "#ai-rate-btn")), "after adding 2: 'נתח סרטונים חדשים (2)'");
   await page.route("**/api/ai-rating", async (r) => {
     if ((r.request().postData() || "").includes("clip3.mp4")) {
-      await r.fulfill({ status: 502, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify({ error: "ai_failed", message: "ניתוח ה-AI נכשל. נסו שוב" }) });
+      await r.fulfill({ status: 502, contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: JSON.stringify({ error: "ai_failed", message: "ניתוח ה-AI נכשל. ודאו שהמצלמה הייתה קבועה ושהשחקן נשאר באותו צד לאורך הסרטון, ונסו שוב" }) });
     } else await r.continue();
   });
   page.requests = [];
@@ -261,7 +261,8 @@ async function waitRunDone(page) {
   assert(page.requests.length === 2 && page.requests.map((r) => r.url.split("/").pop()).join() === "clip1.mp4,clip3.mp4", "second run: only the 2 new videos: " + page.requests.map((r) => r.url.split("/").pop()).join());
   const st = await page.$$eval("#ai-run-list .ai-st", (els) => els.map((e) => e.textContent.trim()));
   assert(JSON.stringify(st) === JSON.stringify(["נותח", "נותח", "נכשל"]), "statuses with a failure: " + st.join(" / "));
-  assert(/1 נותחו, 1 נכשלו/.test(await text(page, "#ai-run-stage")), "summary: " + (await text(page, "#ai-run-stage")));
+  const failSummary = await text(page, "#ai-run-stage");
+  assert(/1 נותחו, 1 נכשלו/.test(failSummary) && /מצלמה הייתה קבועה|אותו צד/.test(failSummary), "summary mentions filming cause: " + failSummary);
   await shot(page, "v13-failed-one.png", "#ai-run");
   await page.unroute("**/api/ai-rating");
   page.requests = [];
