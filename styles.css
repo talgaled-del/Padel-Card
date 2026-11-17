@@ -2442,3 +2442,11 @@ button.coach-tile, .req-rater.coach-tile {
   font-size: 0.8rem;
 }
 .coach-tile-rank { margin: 2px 0 0; font-size: 0.82rem; color: var(--muted); }
+
+.coach-share-bar {
+  margin-top: 14px;
+  padding-inline: 0;
+}
+.home-rater-home .coach-share-bar {
+  margin-top: 12px;
+}
