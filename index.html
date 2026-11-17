@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v22/styles.css" />
-  <link rel="stylesheet" href="v22/cards.css" />
+  <link rel="stylesheet" href="v23/styles.css" />
+  <link rel="stylesheet" href="v23/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -64,6 +64,7 @@
         </button>
         <button class="btn btn-ghost hidden" id="home-card-btn" type="button" style="margin-top:10px">הכרטיס שלי</button>
         <button class="btn btn-star-ghost hidden" id="req-ask-home-btn" type="button" style="margin-top:10px">בקש דירוג ממוסמך</button>
+        <p class="req-cooldown-note hidden" id="req-cooldown-home"></p>
         <button class="btn btn-ghost hidden" id="home-coach-profile-btn" type="button" style="margin-top:10px">הפרופיל שלי כמוסמך</button>
         <button class="btn btn-ghost" id="home-coaches-btn" type="button" style="margin-top:10px">המוסמכים שלנו</button>
         <button class="btn btn-ghost hidden" id="home-admin-btn" type="button" style="margin-top:10px">ניהול משתמשים</button>
@@ -403,14 +404,17 @@
           <h1>הזינו את הקוד</h1>
           <p class="lede">שלחנו קוד בן 6 ספרות אל <strong id="auth-otp-email" dir="ltr"></strong></p>
           <p class="auth-error hidden" id="auth-otp-error" role="alert"></p>
-          <form id="auth-otp-form" class="auth-form">
-            <div class="otp-boxes" id="otp-boxes" dir="ltr" role="group" aria-label="קוד בן 6 ספרות">
-              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" aria-label="ספרה 1" data-otp-index="0" />
-              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 2" data-otp-index="1" />
-              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 3" data-otp-index="2" />
-              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 4" data-otp-index="3" />
-              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 5" data-otp-index="4" />
-              <input class="otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" aria-label="ספרה 6" data-otp-index="5" />
+          <form id="auth-otp-form" class="auth-form" autocomplete="on" action="#" method="post">
+            <div class="otp-boxes" id="otp-boxes" dir="ltr">
+              <div class="otp-slots" id="otp-slots" aria-hidden="true">
+                <span class="otp-digit" data-otp-index="0"></span>
+                <span class="otp-digit" data-otp-index="1"></span>
+                <span class="otp-digit" data-otp-index="2"></span>
+                <span class="otp-digit" data-otp-index="3"></span>
+                <span class="otp-digit" data-otp-index="4"></span>
+                <span class="otp-digit" data-otp-index="5"></span>
+              </div>
+              <input id="auth-otp-input" class="otp-input" type="text" name="otp" inputmode="numeric" pattern="[0-9]*" maxlength="6" minlength="6" autocomplete="one-time-code" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" aria-label="קוד בן 6 ספרות" autofocus dir="ltr" />
             </div>
             <button class="btn btn-ghost" id="auth-otp-paste" type="button">הדבק קוד</button>
             <button class="btn btn-primary" id="auth-otp-submit" type="submit">אימות</button>
@@ -531,6 +535,7 @@
       </a>
       <div class="ut-owner-bar hidden" id="req-ask-bar">
         <button class="btn btn-star" id="req-ask-btn" type="button">בקש דירוג ממוסמך</button>
+        <p class="req-cooldown-note hidden" id="req-cooldown-card"></p>
       </div>
       <div id="req-mine" class="hidden"></div>
       <div class="ut-owner-bar hidden" id="owner-actions">
@@ -847,17 +852,17 @@
       <div id="req-picker-result" class="req-send-result hidden"></div>
     </div>
   </div>
-  <script src="v22/config.js"></script>
+  <script src="v23/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
-  <script src="v22/quiz.js"></script>
-  <script src="v22/players.js"></script>
-  <script src="v22/track.js"></script>
-  <script src="v22/auth.js"></script>
-  <script src="v22/admin.js"></script>
-  <script src="v22/legal.js"></script>
-  <script src="v22/certified.js"></script>
-  <script src="v22/requests.js"></script>
-  <script src="v22/coaches.js"></script>
-  <script src="v22/app.js"></script>
+  <script src="v23/quiz.js"></script>
+  <script src="v23/players.js"></script>
+  <script src="v23/track.js"></script>
+  <script src="v23/auth.js"></script>
+  <script src="v23/admin.js"></script>
+  <script src="v23/legal.js"></script>
+  <script src="v23/certified.js"></script>
+  <script src="v23/requests.js"></script>
+  <script src="v23/coaches.js"></script>
+  <script src="v23/app.js"></script>
 </body>
 </html>

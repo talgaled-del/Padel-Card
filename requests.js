@@ -51,6 +51,10 @@
     if (/cannot assign admin email/.test(low)) return "אי אפשר לשייך למוסמך את האימייל של חשבון מנהל.";
     if (/cannot request own rating/.test(low)) return "אי אפשר לבקש דירוג מעצמכם.";
     if (/too many pending/.test(low)) return "אפשר להמתין על עד שלוש בקשות פתוחות במקביל.";
+    if (/rating request cooldown until/.test(low)) {
+      var iso = (String(msg).match(/(\d{4}-\d{2}-\d{2})/) || [])[1];
+      return cooldownCopy(formatDay(iso));
+    }
     if (/request already pending/.test(low)) return "כבר יש בקשה ממתינה למוסמך הזה.";
     if (/rater has no email/.test(low)) return "למוסמך הזה עדיין אין אימייל משויך. סמנו «בקרוב».";
     if (/request not pending/.test(low)) return "הבקשה כבר אינה ממתינה.";
@@ -60,6 +64,62 @@
     if (/permission denied/.test(low)) return "אין הרשאה לפעולה הזו. ודאו שאתם מחוברים לחשבון הנכון.";
     if (window.PadelCertified && PadelCertified.hebrewError) return PadelCertified.hebrewError(err);
     return msg || "הפעולה נכשלה. נסו שוב.";
+  }
+
+  function formatDay(iso) {
+    if (!iso) return "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      var p = iso.split("-");
+      return p[2] + "/" + p[1] + "/" + p[0];
+    }
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    var parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Jerusalem",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric"
+    }).formatToParts(d);
+    var get = function (t) {
+      for (var i = 0; i < parts.length; i++) if (parts[i].type === t) return parts[i].value;
+      return "";
+    };
+    return get("day") + "/" + get("month") + "/" + get("year");
+  }
+
+  function cooldownCopy(day) {
+    return "אפשר לבקש דירוג מוסמך אחת לשלושה חודשים — זמן להתאמן ולהשתפר." +
+      (day ? " אפשר לבקש שוב ב־" + day + "." : "");
+  }
+
+  function paintCooldown(info) {
+    cache.cooldown = info || cache.cooldown || { active: false };
+    var locked = !!(cache.cooldown && cache.cooldown.active);
+    var day = cache.cooldown && (cache.cooldown.next_allowed_date || formatDay(cache.cooldown.next_allowed_at));
+    var text = locked ? cooldownCopy(day) : "";
+    ["req-ask-home-btn", "req-ask-btn"].forEach(function (id) {
+      var btn = $(id);
+      if (btn) {
+        btn.disabled = locked;
+        btn.setAttribute("aria-disabled", locked ? "true" : "false");
+      }
+    });
+    ["req-cooldown-home", "req-cooldown-card"].forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.toggle("hidden", !locked);
+    });
+  }
+
+  function loadCooldown() {
+    return rpc("get_rating_request_cooldown").then(function (data) {
+      paintCooldown(data || { active: false });
+      return cache.cooldown;
+    }).catch(function () {
+      paintCooldown({ active: false });
+      return cache.cooldown;
+    });
   }
 
   function fmtDate(iso) {
@@ -231,6 +291,10 @@
   function openPicker() {
     if (!hooks.hasCard()) {
       hooks.showToast("צרו כרטיס כדי לבקש דירוג ממוסמך");
+      return;
+    }
+    if (cache.cooldown && cache.cooldown.active) {
+      hooks.showToast(cooldownCopy(cache.cooldown.next_allowed_date || formatDay(cache.cooldown.next_allowed_at)));
       return;
     }
     picked = {};
@@ -454,7 +518,7 @@
   }
 
   function refresh() {
-    var tasks = [loadMine(), loadUnseenRatings()];
+    var tasks = [loadMine(), loadUnseenRatings(), loadCooldown()];
     if (hooks.isRater()) tasks.push(loadInbox());
     return Promise.all(tasks).then(function () {
       renderMine($("req-mine"));
@@ -563,6 +627,7 @@
     hebrewError: hebrewError,
     statusLabel: statusLabel,
     pendingCount: pendingCount,
+    cooldownCopy: cooldownCopy,
     cached: function () { return cache; }
   };
 })();

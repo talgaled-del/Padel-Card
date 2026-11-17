@@ -92,8 +92,32 @@ export async function ensureTestUser() {
   return ensureUser(TEST_EMAIL);
 }
 
+export async function deleteRequestsForUser(userId) {
+  if (!userId) return;
+  await adminFetch("/rest/v1/rating_requests?requester_id=eq." + encodeURIComponent(userId), { method: "DELETE" });
+}
+
+export async function insertTestRatingRequest(row) {
+  const body = {
+    card_id: row.cardId,
+    requester_id: row.requesterId,
+    rater_id: row.raterId,
+    status: row.status || "pending",
+    message: row.message || null
+  };
+  if (row.createdAt) body.created_at = row.createdAt;
+  const res = await adminFetch("/rest/v1/rating_requests", {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error("insertTestRatingRequest failed: " + errMsg(res, "request"));
+  return Array.isArray(res.body) ? res.body[0] : res.body;
+}
+
 export async function deleteTestUser(userId) {
   if (!userId) return;
+  await deleteRequestsForUser(userId);
   await adminFetch("/rest/v1/cards?user_id=eq." + encodeURIComponent(userId), { method: "DELETE" });
   await adminFetch("/rest/v1/admin_actions?or=(target_user_id.eq." + userId + ",admin_id.eq." + userId + ")", { method: "DELETE" });
   await adminFetch("/rest/v1/admins?user_id=eq." + userId, { method: "DELETE" });

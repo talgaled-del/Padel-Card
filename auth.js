@@ -90,10 +90,14 @@
     if (methods) methods.classList.toggle("hidden", name !== "methods");
     if (otp) otp.classList.toggle("hidden", name !== "otp");
     if (name === "otp") {
-      setTimeout(function () {
-        var first = document.querySelector(".otp-digit");
-        if (first) first.focus();
-      }, 50);
+      var focusOtp = function () {
+        var input = otpInput();
+        if (input) input.focus({ preventScroll: true });
+        syncOtpSlots();
+      };
+      focusOtp();
+      setTimeout(focusOtp, 50);
+      setTimeout(focusOtp, 200);
     }
   }
 
@@ -117,25 +121,51 @@
     if (ownerOut) ownerOut.classList.toggle("hidden", !signedIn);
   }
 
+  function otpInput() {
+    return $("auth-otp-input");
+  }
+
   function otpDigits() {
-    return Array.prototype.map.call(document.querySelectorAll(".otp-digit"), function (el) {
-      return (el.value || "").replace(/\D/g, "").slice(0, 1);
-    }).join("");
+    var el = otpInput();
+    return String((el && el.value) || "").replace(/\D/g, "").slice(0, 6);
+  }
+
+  function syncOtpSlots() {
+    var digits = otpDigits();
+    var slots = document.querySelectorAll("#otp-slots .otp-digit");
+    var el = otpInput();
+    var focused = !!(el && document.activeElement === el);
+    var caret = digits.length === 6 ? 5 : digits.length;
+    for (var i = 0; i < slots.length; i++) {
+      slots[i].textContent = digits.charAt(i) || "";
+      slots[i].classList.toggle("is-filled", i < digits.length);
+      slots[i].classList.toggle("is-on", focused && i === caret);
+    }
+  }
+
+  var writingOtp = false;
+  var otpValueDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+
+  function setOtpRaw(el, value) {
+    if (otpValueDesc && otpValueDesc.set) otpValueDesc.set.call(el, value);
+    else el.value = value;
   }
 
   function fillOtp(digits, autoSubmit) {
-    var boxes = document.querySelectorAll(".otp-digit");
+    var el = otpInput();
     var clean = String(digits || "").replace(/\D/g, "").slice(0, 6);
-    for (var i = 0; i < boxes.length; i++) {
-      boxes[i].value = clean.charAt(i) || "";
+    writingOtp = true;
+    if (el) {
+      setOtpRaw(el, clean);
+      syncOtpSlots();
+      el.focus();
     }
-    if (clean.length < 6 && boxes[clean.length]) boxes[clean.length].focus();
-    else if (boxes[5]) boxes[5].focus();
+    writingOtp = false;
     if (autoSubmit && clean.length === 6) submitOtp();
   }
 
   function clearOtp() {
-    document.querySelectorAll(".otp-digit").forEach(function (el) { el.value = ""; });
+    fillOtp("", false);
   }
 
   function startCooldown(seconds) {
@@ -224,9 +254,11 @@
     });
   }
 
+  var otpBusy = false;
   function submitOtp(ev) {
     if (ev) ev.preventDefault();
     showError("auth-otp-error", "");
+    if (otpBusy) return;
     var token = otpDigits();
     if (token.length !== 6) {
       showError("auth-otp-error", "יש להזין 6 ספרות.");
@@ -237,12 +269,14 @@
       return;
     }
     var btn = $("auth-otp-submit");
+    otpBusy = true;
     setBusy(btn, true, "מאמתים…");
     client.auth.verifyOtp({
       email: pendingEmail,
       token: token,
       type: "email"
     }).then(function (res) {
+      otpBusy = false;
       setBusy(btn, false);
       if (res && res.error) {
         showError("auth-otp-error", hebrewAuthError(res.error));
@@ -263,6 +297,7 @@
         showError("auth-otp-error", "האימות הצליח, אך לא התקבלה התחברות. נסו שוב.");
       }
     }).catch(function (err) {
+      otpBusy = false;
       setBusy(btn, false);
       showError("auth-otp-error", hebrewAuthError(err));
     });
@@ -291,8 +326,8 @@
   function pasteOtp() {
     if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") {
       toast("אין גישה ללוח. הדביקו ידנית לתיבה.");
-      var first = document.querySelector(".otp-digit");
-      if (first) first.focus();
+      var input = otpInput();
+      if (input) input.focus();
       return;
     }
     navigator.clipboard.readText().then(function (text) {
@@ -352,37 +387,56 @@
     return Promise.resolve();
   }
 
-  function bindOtpBoxes() {
-    var boxes = document.querySelectorAll(".otp-digit");
-    boxes.forEach(function (box, i) {
-      box.addEventListener("input", function () {
-        var raw = (box.value || "").replace(/\D/g, "");
-        if (raw.length > 1) {
-          fillOtp(otpDigits().slice(0, i) + raw, true);
-          return;
-        }
-        box.value = raw.slice(0, 1);
-        if (raw && boxes[i + 1]) boxes[i + 1].focus();
-        if (otpDigits().length === 6) submitOtp();
-      });
-      box.addEventListener("keydown", function (ev) {
-        if (ev.key === "Backspace" && !box.value && i > 0) {
-          ev.preventDefault();
-          boxes[i - 1].value = "";
-          boxes[i - 1].focus();
-        }
-        if (ev.key === "ArrowLeft" && i > 0) { ev.preventDefault(); boxes[i - 1].focus(); }
-        if (ev.key === "ArrowRight" && boxes[i + 1]) { ev.preventDefault(); boxes[i + 1].focus(); }
-      });
-      box.addEventListener("paste", function (ev) {
-        var text = (ev.clipboardData || window.clipboardData).getData("text") || "";
-        var digits = text.replace(/\D/g, "").slice(0, 6);
-        if (!digits) return;
-        ev.preventDefault();
-        fillOtp(digits, true);
-      });
-      box.addEventListener("focus", function () { box.select(); });
+  function onOtpInput() {
+    var el = otpInput();
+    if (!el) return;
+    var clean = otpDigits();
+    if (otpValueDesc && otpValueDesc.get && otpValueDesc.get.call(el) !== clean) {
+      writingOtp = true;
+      setOtpRaw(el, clean);
+      writingOtp = false;
+    }
+    syncOtpSlots();
+    if (clean.length === 6) submitOtp();
+  }
+
+  function hookOtpValue() {
+    var el = otpInput();
+    if (!el || el.dataset.otpHooked || !otpValueDesc || !otpValueDesc.get || !otpValueDesc.set) return;
+    el.dataset.otpHooked = "1";
+    Object.defineProperty(el, "value", {
+      configurable: true,
+      enumerable: true,
+      get: function () { return otpValueDesc.get.call(el); },
+      set: function (v) {
+        var clean = String(v == null ? "" : v).replace(/\D/g, "").slice(0, 6);
+        otpValueDesc.set.call(el, clean);
+        syncOtpSlots();
+        if (!writingOtp && clean.length === 6) submitOtp();
+      }
     });
+  }
+
+  function bindOtpBoxes() {
+    var el = otpInput();
+    if (!el) return;
+    hookOtpValue();
+    el.addEventListener("input", onOtpInput);
+    el.addEventListener("change", onOtpInput);
+    el.addEventListener("keyup", function (ev) {
+      if (ev.key === "Backspace" || ev.key === "Delete") syncOtpSlots();
+    });
+    el.addEventListener("paste", function (ev) {
+      var text = ((ev.clipboardData || window.clipboardData) && (ev.clipboardData || window.clipboardData).getData("text")) || "";
+      var digits = text.replace(/\D/g, "").slice(0, 6);
+      if (!digits) return;
+      ev.preventDefault();
+      fillOtp(digits, true);
+    });
+    el.addEventListener("focus", syncOtpSlots);
+    el.addEventListener("blur", syncOtpSlots);
+    var box = $("otp-boxes");
+    if (box) box.addEventListener("click", function () { el.focus(); });
   }
 
   function bind() {
