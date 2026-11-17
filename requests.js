@@ -94,14 +94,15 @@
 
   function paintCooldown(info) {
     cache.cooldown = info || cache.cooldown || { active: false };
-    var locked = !!(cache.cooldown && cache.cooldown.active);
+    var rater = !!(hooks.isRater && hooks.isRater());
+    var locked = !rater && !!(cache.cooldown && cache.cooldown.active);
     var day = cache.cooldown && (cache.cooldown.next_allowed_date || formatDay(cache.cooldown.next_allowed_at));
     var text = locked ? cooldownCopy(day) : "";
     ["req-ask-home-btn", "req-ask-btn"].forEach(function (id) {
       var btn = $(id);
       if (btn) {
-        btn.disabled = locked;
-        btn.setAttribute("aria-disabled", locked ? "true" : "false");
+        btn.disabled = locked || rater;
+        btn.setAttribute("aria-disabled", (locked || rater) ? "true" : "false");
       }
     });
     ["req-cooldown-home", "req-cooldown-card"].forEach(function (id) {
@@ -293,6 +294,10 @@
       hooks.showToast("צרו כרטיס כדי לבקש דירוג ממוסמך");
       return;
     }
+    if (hooks.isRater && hooks.isRater()) {
+      hooks.showToast("מוסמכים מדרגים שחקנים — אין צורך בכרטיס שחקן או בבקשת דירוג.");
+      return;
+    }
     if (cache.cooldown && cache.cooldown.active) {
       hooks.showToast(cooldownCopy(cache.cooldown.next_allowed_date || formatDay(cache.cooldown.next_allowed_at)));
       return;
@@ -349,6 +354,12 @@
       var years = "";
       if (r.years_experience === 1) years = "שנת אימון אחת";
       else if (r.years_experience) years = r.years_experience + " שנות אימון";
+      var level = "";
+      if (r.level) {
+        var lab = (window.PadelCoaches && PadelCoaches.levelLabel) ? PadelCoaches.levelLabel(r.level) : r.level;
+        level = '<p class="coach-tile-level"><b dir="ltr">' + escapeHtml(r.level) + "</b><span>" + escapeHtml(lab) + "</span></p>";
+      }
+      var rank = r.national_ranking ? '<p class="coach-tile-rank">דירוג ארצי · ' + escapeHtml(r.national_ranking) + "</p>" : "";
       return '<button type="button" class="' + cls + '" data-rater-id="' + escapeHtml(r.id) + '"' +
         (ready && !pending ? "" : " disabled") + ">" +
         photo +
@@ -358,6 +369,7 @@
           "</div>" +
           (clubs ? '<p class="coach-tile-clubs">' + escapeHtml(clubs) + "</p>" : "") +
           (years ? '<p class="coach-tile-years">' + escapeHtml(years) + "</p>" : "") +
+          level + rank +
         "</div>" +
       "</button>";
     }).join("");

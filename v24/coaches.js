@@ -65,6 +65,8 @@
     if (/coach not found/.test(low)) return "כרטיס המוסמך לא נמצא.";
     if (/invalid contact/.test(low)) return "מספר הטלפון אינו תקין.";
     if (/invalid photo/.test(low)) return "יש להעלות תמונה מכתובת מאובטחת.";
+    if (/invalid level/.test(low)) return "בחרו רמה מהסולם הישראלי.";
+    if (/certified raters cannot have a player card/.test(low)) return "למוסמך אין כרטיס שחקן. כרטיס המוסמך הוא הפרופיל שלכם.";
     if (/invalid profile|invalid club|too many clubs/.test(low)) return "בדקו את פרטי הפרופיל ונסו שוב.";
     if (/not a certified rater/.test(low)) return "רק מוסמך פעיל יכול לערוך את הפרופיל הזה.";
     if (/not authorized/.test(low)) return "יש להתחבר כדי להמשיך.";
@@ -127,13 +129,57 @@
     try { return sessionStorage.getItem("padelCard.inviteToken") || ""; } catch (err) { return ""; }
   }
 
-  function computeWeighted(coach) {
-    if (hooks.weightedLevel) {
-      var player = coach && coach.player;
-      if (!player) return null;
-      return hooks.weightedLevel(player.levelId, player.ai_level, coach.player_cert_levels || []);
+  function levelMeta(id) {
+    if (!id || !window.PadelQuiz || !PadelQuiz.LEVELS) return null;
+    for (var i = 0; i < PadelQuiz.LEVELS.length; i++) {
+      if (PadelQuiz.LEVELS[i].id === id) return PadelQuiz.LEVELS[i];
     }
     return null;
+  }
+
+  function levelLabel(id) {
+    var m = levelMeta(id);
+    if (!m) return id || "";
+    return m.id + " · " + m.title;
+  }
+
+  function fillLevelSelect(sel, current) {
+    if (!sel) return;
+    var levels = (window.PadelQuiz && PadelQuiz.LEVELS) || [];
+    var html = '<option value="">בחרו רמה</option>';
+    for (var i = 0; i < levels.length; i++) {
+      var L = levels[i];
+      html += '<option value="' + escapeHtml(L.id) + '"' + (current === L.id ? " selected" : "") + ">" +
+        escapeHtml(L.id + " — " + L.title + " (" + L.numeric + ")") + "</option>";
+    }
+    sel.innerHTML = html;
+    if (current) sel.value = current;
+  }
+
+  function credsHtml(c) {
+    if (!c) return "";
+    var meta = levelMeta(c.level);
+    var level = c.level
+      ? '<div class="coach-level-badge"><b dir="ltr">' + escapeHtml(c.level) + "</b><span>הרמה שלי" +
+        (meta && meta.title ? " · " + escapeHtml(meta.title) : "") + "</span></div>"
+      : "";
+    var rank = c.national_ranking
+      ? '<div class="coach-ranking-badge"><b>' + escapeHtml(c.national_ranking) + "</b><span>דירוג ארצי</span></div>"
+      : "";
+    if (!level && !rank) return "";
+    return '<div class="coach-creds">' + level + rank + "</div>";
+  }
+
+  function tileLevelHtml(c) {
+    var bits = [];
+    if (c.level) {
+      bits.push('<p class="coach-tile-level"><b dir="ltr">' + escapeHtml(c.level) + "</b><span>" +
+        escapeHtml(levelLabel(c.level)) + "</span></p>");
+    }
+    if (c.national_ranking) {
+      bits.push('<p class="coach-tile-rank">דירוג ארצי · ' + escapeHtml(c.national_ranking) + "</p>");
+    }
+    return bits.join("");
   }
 
   function coachTileHtml(c, opts) {
@@ -152,6 +198,7 @@
         (loc ? '<p class="coach-tile-meta">' + escapeHtml(loc) + "</p>" : "") +
         (clubs ? '<p class="coach-tile-clubs">' + escapeHtml(clubs) + "</p>" : "") +
         (years ? '<p class="coach-tile-years">' + escapeHtml(years) + "</p>" : "") +
+        tileLevelHtml(c) +
       "</div></" + tag + ">";
   }
 
@@ -201,12 +248,10 @@
     var aud = (coach.audiences || []).map(function (a) {
       return '<span class="pill">' + escapeHtml(audienceLabel(a)) + "</span>";
     }).join("");
-    var weighted = coach.show_player_card !== false ? computeWeighted(coach) : null;
-    var playerLevel = weighted && (weighted.id || weighted);
     var contact = coach.contact_public && coach.contact ? coach.contact : "";
     var wa = contact ? waLink(contact) : "";
-    var playerLink = coach.has_player_card && coach.player && coach.player.profile && coach.player.profile.id
-      ? '<button type="button" class="btn btn-ghost" id="coach-open-player">לכרטיס השחקן</button>'
+    var levelOnHero = coach.level
+      ? '<div class="coach-level-badge"><b dir="ltr">' + escapeHtml(coach.level) + "</b><span>הרמה שלי</span></div>"
       : "";
 
     root.innerHTML =
@@ -219,10 +264,10 @@
             "<h1>" + escapeHtml(coach.full_name || "מוסמך") + "</h1>" +
             (loc ? "<p>" + escapeHtml(loc) + "</p>" : "") +
           "</div>" +
-          (playerLevel ? '<div class="coach-player-badge" title="דירוג שחקן משוקלל"><b dir="ltr">' +
-            escapeHtml(playerLevel) + "</b><span>דירוג שחקן</span></div>" : "") +
+          levelOnHero +
         "</div>" +
         '<div class="coach-card-body">' +
+          credsHtml(coach) +
           (years || coach.certification ? '<p class="coach-card-cred">' +
             escapeHtml([years, coach.certification].filter(Boolean).join(" · ")) + "</p>" : "") +
           (clubs ? '<p class="ut-section">מועדונים</p><div class="ut-shots">' + clubs + "</div>" : "") +
@@ -230,7 +275,6 @@
           (coach.bio ? '<p class="ut-section">קצת עליי</p><p class="coach-bio">' + escapeHtml(coach.bio) + "</p>" : "") +
           '<div class="coach-card-actions">' +
             (wa ? '<a class="btn btn-primary" id="coach-wa" href="' + escapeHtml(wa) + '" target="_blank" rel="noopener">וואטסאפ לשיעור</a>' : "") +
-            playerLink +
             '<button type="button" class="btn btn-ghost" id="coach-share-btn">שיתוף הכרטיס</button>' +
           "</div>" +
         "</div>" +
@@ -243,9 +287,6 @@
           hooks.showToast("הקישור הועתק");
         }).catch(function () { hooks.showToast(url); });
       } else hooks.showToast("הקישור מוכן להעתקה");
-    });
-    if ($("coach-open-player")) $("coach-open-player").addEventListener("click", function () {
-      if (hooks.openPlayerCard) hooks.openPlayerCard(coach.player);
     });
   }
 
@@ -277,7 +318,8 @@
       contact: (($("coach-edit-contact") || {}).value || "").trim(),
       contact_public: !!($("coach-edit-contact-public") && $("coach-edit-contact-public").checked),
       photo: (($("coach-edit-photo-url") || {}).value || "").trim() || null,
-      show_player_card: !($("coach-edit-hide-player") && $("coach-edit-hide-player").checked)
+      level: (($("coach-edit-level") || {}).value || "").trim() || null,
+      national_ranking: (($("coach-edit-ranking") || {}).value || "").trim()
     };
   }
 
@@ -293,13 +335,14 @@
     if ($("coach-edit-contact")) $("coach-edit-contact").value = data.contact || "";
     if ($("coach-edit-contact-public")) $("coach-edit-contact-public").checked = !!data.contact_public;
     if ($("coach-edit-photo-url")) $("coach-edit-photo-url").value = data.photo || "";
-    if ($("coach-edit-hide-player")) $("coach-edit-hide-player").checked = data.show_player_card === false;
+    fillLevelSelect($("coach-edit-level"), data.level || "");
+    if ($("coach-edit-ranking")) $("coach-edit-ranking").value = data.national_ranking || "";
     document.querySelectorAll("#coach-edit-audiences input[type=checkbox]").forEach(function (el) {
       el.checked = (data.audiences || []).indexOf(el.value) !== -1;
     });
     var preview = $("coach-edit-photo-preview");
     if (preview) {
-      preview.innerHTML = photoTag(data.photo || hooks.playerPhoto(), data.full_name, "coach-edit-photo");
+      preview.innerHTML = photoTag(data.photo, data.full_name, "coach-edit-photo");
     }
     var status = $("coach-edit-status");
     if (status) {
@@ -341,17 +384,6 @@
       editorBusy = false;
       if (btn) btn.disabled = false;
     });
-  }
-
-  function usePlayerPhoto() {
-    var url = hooks.playerPhoto && hooks.playerPhoto();
-    if (!url || String(url).indexOf("https://") !== 0) {
-      hooks.showToast(!url ? "אין עדיין תמונה בכרטיס השחקן" : "תמונת הכרטיס אינה בכתובת מאובטחת, העלו תמונה חדשה");
-      return;
-    }
-    if ($("coach-edit-photo-url")) $("coach-edit-photo-url").value = url;
-    var preview = $("coach-edit-photo-preview");
-    if (preview) preview.innerHTML = photoTag(url, "מוסמך", "coach-edit-photo");
   }
 
   function onPhotoFile(file) {
@@ -407,10 +439,52 @@
     });
   }
 
+  function loadHomePreview() {
+    var box = $("home-coach-preview");
+    var wrap = $("home-rater-home");
+    if (!box) return;
+    if (!hooks.isRater || !hooks.isRater()) {
+      box.innerHTML = "";
+      if (wrap) wrap.classList.add("hidden");
+      return;
+    }
+    if (wrap) wrap.classList.remove("hidden");
+    return rpc("get_my_certified_profile").then(function (data) {
+      if (data && data.is_complete) {
+        var saved = $("coach-card-root") && $("coach-card-root").innerHTML;
+        var main = $("coach-card-root");
+        // Render into the preview by temporarily swapping the root id target via a clone container.
+        renderCoachInto(box, data);
+        if (main && saved != null) { /* keep main root untouched */ }
+      } else {
+        box.innerHTML = '<div class="coach-home-incomplete"><p>השלימו את כרטיס המוסמך כדי לפרסם אותו לשחקנים. זה הפרופיל שלכם — בלי כרטיס שחקן.</p>' +
+          '<button type="button" class="btn btn-primary" id="home-complete-coach">השלמת הפרופיל</button></div>';
+        if ($("home-complete-coach")) $("home-complete-coach").addEventListener("click", function () { hooks.go("coach-profile"); });
+      }
+    }).catch(function () {
+      box.innerHTML = "";
+    });
+  }
+
+  function renderCoachInto(root, coach) {
+    if (!root) return;
+    var prev = $("coach-card-root");
+    var prevId = prev && prev.id;
+    root.id = "coach-card-root";
+    try { renderCoachCard(coach); }
+    finally {
+      root.id = root === prev ? "coach-card-root" : (root.getAttribute("data-root-id") || "home-coach-preview");
+      if (prev && prev !== root) prev.id = prevId || "coach-card-root";
+    }
+    var share = root.querySelector("#coach-share-btn");
+    if (share) share.id = "home-coach-share-btn";
+    var wa = root.querySelector("#coach-wa");
+    if (wa) wa.id = "home-coach-wa";
+  }
+
   function bind() {
     if ($("coaches-search")) $("coaches-search").addEventListener("input", renderDirectory);
     if ($("coach-edit-save")) $("coach-edit-save").addEventListener("click", saveEditor);
-    if ($("coach-edit-use-player-photo")) $("coach-edit-use-player-photo").addEventListener("click", usePlayerPhoto);
     if ($("coach-edit-photo-file")) $("coach-edit-photo-file").addEventListener("change", function (ev) {
       var file = ev.target && ev.target.files && ev.target.files[0];
       if (file) onPhotoFile(file);
@@ -428,6 +502,8 @@
     loadDirectory: loadDirectory,
     loadCoach: loadCoach,
     loadEditor: loadEditor,
+    loadHomePreview: loadHomePreview,
+    levelLabel: levelLabel,
     renderInvite: renderInvite,
     claimPendingInvite: claimPendingInvite,
     setInviteToken: setInviteToken,

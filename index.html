@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v23/styles.css" />
-  <link rel="stylesheet" href="v23/cards.css" />
+  <link rel="stylesheet" href="v24/styles.css" />
+  <link rel="stylesheet" href="v24/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -65,6 +65,9 @@
         <button class="btn btn-ghost hidden" id="home-card-btn" type="button" style="margin-top:10px">הכרטיס שלי</button>
         <button class="btn btn-star-ghost hidden" id="req-ask-home-btn" type="button" style="margin-top:10px">בקש דירוג ממוסמך</button>
         <p class="req-cooldown-note hidden" id="req-cooldown-home"></p>
+        <div id="home-rater-home" class="home-rater-home hidden">
+          <div id="home-coach-preview"></div>
+        </div>
         <button class="btn btn-ghost hidden" id="home-coach-profile-btn" type="button" style="margin-top:10px">הפרופיל שלי כמוסמך</button>
         <button class="btn btn-ghost" id="home-coaches-btn" type="button" style="margin-top:10px">המוסמכים שלנו</button>
         <button class="btn btn-ghost hidden" id="home-admin-btn" type="button" style="margin-top:10px">ניהול משתמשים</button>
@@ -631,16 +634,15 @@
       <button type="button" class="text-btn back-link" data-go="home">חזרה</button>
       <div class="eyebrow">כרטיס מוסמך</div>
       <h1 id="coach-edit-name">הפרופיל שלי כמוסמך</h1>
-      <p class="lede">הפרופיל הזה מופיע במדריך המוסמכים ובבקשות דירוג. מלאו את הפרטים כדי ששחקנים יכירו אתכם.</p>
+      <p class="lede">זה כרטיס המוסמך שלכם — המוניטין והרמה המקצועית שלכם. מלאו את הפרטים כדי ששחקנים יכירו אתכם.</p>
       <p class="coach-edit-status" id="coach-edit-status"></p>
       <a class="text-btn hidden" id="coach-edit-public-link" href="#/coaches">לצפייה בכרטיס הציבורי</a>
 
       <div class="coach-edit">
         <div class="coach-edit-photo-wrap">
           <div id="coach-edit-photo-preview"></div>
-          <div class="btn-row two" style="margin-top:10px">
+          <div class="btn-row" style="margin-top:10px">
             <label class="btn btn-ghost" for="coach-edit-photo-file">העלאת תמונה</label>
-            <button type="button" class="btn btn-ghost" id="coach-edit-use-player-photo">שימוש בתמונת הכרטיס</button>
           </div>
           <input type="file" id="coach-edit-photo-file" accept="image/*" class="hidden" />
           <input type="hidden" id="coach-edit-photo-url" />
@@ -671,6 +673,14 @@
         <label class="certified-note-label" for="coach-edit-cert">הסמכה או קורס (לא חובה)</label>
         <input id="coach-edit-cert" type="text" maxlength="160" placeholder="למשל מאמן מוסמך איגוד הפאדל" />
 
+        <label class="certified-note-label" for="coach-edit-level">הרמה שלי</label>
+        <select id="coach-edit-level">
+          <option value="">בחרו רמה</option>
+        </select>
+
+        <label class="certified-note-label" for="coach-edit-ranking">דירוג ארצי (לא חובה)</label>
+        <input id="coach-edit-ranking" type="text" maxlength="80" placeholder="למשל 12 באיגוד הפאדל הישראלי" />
+
         <p class="certified-note-label">את מי אתם מלמדים</p>
         <div id="coach-edit-audiences" class="coach-audiences">
           <label><input type="checkbox" value="kids" /> ילדים</label>
@@ -685,7 +695,6 @@
         <label class="certified-note-label" for="coach-edit-contact">וואטסאפ או טלפון לשיעורים (לא חובה)</label>
         <input id="coach-edit-contact" type="tel" dir="ltr" maxlength="40" placeholder="0500000000" />
         <label class="coach-check"><input type="checkbox" id="coach-edit-contact-public" /> הציגו את פרטי הקשר בכרטיס הציבורי</label>
-        <label class="coach-check"><input type="checkbox" id="coach-edit-hide-player" /> אל תציגו את דירוג השחקן שלי בכרטיס המוסמך</label>
 
         <button type="button" class="btn btn-primary" id="coach-edit-save" style="margin-top:16px">שמירת הפרופיל</button>
       </div>
@@ -852,17 +861,17 @@
       <div id="req-picker-result" class="req-send-result hidden"></div>
     </div>
   </div>
-  <script src="v23/config.js"></script>
+  <script src="v24/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
-  <script src="v23/quiz.js"></script>
-  <script src="v23/players.js"></script>
-  <script src="v23/track.js"></script>
-  <script src="v23/auth.js"></script>
-  <script src="v23/admin.js"></script>
-  <script src="v23/legal.js"></script>
-  <script src="v23/certified.js"></script>
-  <script src="v23/requests.js"></script>
-  <script src="v23/coaches.js"></script>
-  <script src="v23/app.js"></script>
+  <script src="v24/quiz.js"></script>
+  <script src="v24/players.js"></script>
+  <script src="v24/track.js"></script>
+  <script src="v24/auth.js"></script>
+  <script src="v24/admin.js"></script>
+  <script src="v24/legal.js"></script>
+  <script src="v24/certified.js"></script>
+  <script src="v24/requests.js"></script>
+  <script src="v24/coaches.js"></script>
+  <script src="v24/app.js"></script>
 </body>
 </html>

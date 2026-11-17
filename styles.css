@@ -2371,3 +2371,74 @@ button.coach-tile, .req-rater.coach-tile {
 .back-link { margin-bottom: 8px; }
 
 #req-picker-list.req-rater-list { display: grid; gap: 10px; }
+
+.home-rater-home { margin-top: 8px; }
+.home-rater-home .coach-card { margin-top: 8px; }
+.coach-home-incomplete {
+  margin-top: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255,255,255,0.04);
+  text-align: center;
+}
+.coach-home-incomplete p { margin: 0 0 12px; color: var(--muted); }
+.coach-creds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+  margin: 0 0 14px;
+}
+.coach-level-badge, .coach-ranking-badge {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  border-radius: 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(200, 255, 60, 0.08);
+  min-width: 5.5rem;
+}
+.coach-level-badge b, .coach-ranking-badge b {
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+}
+.coach-level-badge span, .coach-ranking-badge span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.coach-ranking-badge b { font-size: 1.05rem; }
+.coach-card-hero .coach-level-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(8, 18, 14, 0.82);
+  border-color: rgba(200, 255, 60, 0.45);
+  backdrop-filter: blur(8px);
+  text-align: center;
+}
+.coach-card-hero .coach-level-badge span { color: rgba(255,255,255,0.8); }
+.coach-tile-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+}
+.coach-tile-level b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.1rem;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(200, 255, 60, 0.16);
+  border: 1px solid rgba(200, 255, 60, 0.35);
+  font-size: 0.8rem;
+}
+.coach-tile-rank { margin: 2px 0 0; font-size: 0.82rem; color: var(--muted); }
