@@ -223,13 +223,44 @@ export async function cleanupCertifiedTestData() {
     const email = String(r && r.email || "").toLowerCase();
     const name = String(r && r.full_name || "");
     if (email.endsWith("@example.com") && /padel\.test/.test(email)) return true;
-    if (/v20|בדיקה/.test(name) && !/עמית נאור|אהרון|דניאל|נועם|סער|עמית שחר/.test(name)) return true;
+    if (/v20|v21|v22|בדיקה/.test(name) && !/עמית נאור|אהרון|דניאל|נועם|סער|עמית שחר/.test(name)) return true;
     return false;
   });
   for (const r of testRaters) {
     await adminFetch("/rest/v1/rating_requests?rater_id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
     await adminFetch("/rest/v1/certified_ratings?rater_id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
-    await adminFetch("/rest/v1/certified_raters?id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
+    await adminFetch("/rest/v1/certified_rater_invites?rater_id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
+    await adminFetch("/rest/v1/certified_rater_profiles?rater_id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
+    const del = await adminFetch("/rest/v1/certified_raters?id=eq." + encodeURIComponent(r.id), { method: "DELETE" });
+    if (!del.ok && del.status !== 404) throw new Error("delete test rater failed: " + errMsg(del, "rater"));
   }
   return testRaters.length;
+}
+
+export async function listTestRatersBrief() {
+  const ratersRes = await adminFetch("/rest/v1/certified_raters?select=id,full_name,active,email", { method: "GET" });
+  if (!ratersRes.ok) throw new Error("list raters failed: " + errMsg(ratersRes, "raters"));
+  const raters = Array.isArray(ratersRes.body) ? ratersRes.body : [];
+  return raters.filter((r) => {
+    const email = String(r && r.email || "").toLowerCase();
+    const name = String(r && r.full_name || "");
+    return (email.endsWith("@example.com") && /padel\.test/.test(email)) || /v20|v21|v22|בדיקה/.test(name);
+  }).map((r) => ({
+    id: r.id,
+    full_name: r.full_name,
+    active: r.active,
+    has_email: !!r.email,
+    test_email: /padel\.test.*@example\.com/i.test(String(r.email || ""))
+  }));
+}
+
+// Test-only: expire unused invite tokens for a disposable rater.
+export async function expireOpenInvites(raterId) {
+  if (!raterId) return;
+  const res = await adminFetch("/rest/v1/certified_rater_invites?rater_id=eq." + encodeURIComponent(raterId) + "&used_at=is.null", {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ expires_at: new Date(Date.now() - 60 * 1000).toISOString() })
+  });
+  if (!res.ok) throw new Error("expireOpenInvites failed: " + errMsg(res, "expire invites"));
 }

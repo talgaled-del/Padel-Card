@@ -786,8 +786,31 @@
     }
     state.rateRequestId = null;
 
+    if (parts[0] === "coaches") {
+      state.view = "coaches";
+      return;
+    }
+    if (parts[0] === "coach" && parts[1]) {
+      state.coachId = parts[1];
+      state.view = "coach";
+      return;
+    }
+    if (parts[0] === "invite" && parts[1]) {
+      state.inviteToken = parts[1];
+      if (window.PadelCoaches && PadelCoaches.setInviteToken) PadelCoaches.setInviteToken(parts[1]);
+      state.view = "invite";
+      gateOwnerViews();
+      return;
+    }
+    if (parts[0] === "coach-profile") {
+      state.view = "coach-profile";
+      gateOwnerViews();
+      return;
+    }
+    state.coachId = null;
+
     var route = parts[0] || "home";
-    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1, terms: 1, privacy: 1, copyright: 1, rate: 1 };
+    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1, terms: 1, privacy: 1, copyright: 1, rate: 1, coaches: 1, coach: 1, "coach-profile": 1, invite: 1 };
     if (route === "result" && !state.levelId) { state.view = "quiz"; return; }
     if (route === "profile" && !state.levelId) { state.view = "quiz"; return; }
     if ((route === "card" || route === "share" || route === "pair") && (!state.profile || !state.levelId)) {
@@ -806,6 +829,12 @@
   function gateOwnerViews() {
     if (isVisitorView()) return;
     if (state.view === "legal") return;
+    if (state.view === "coaches" || state.view === "coach") return;
+    if (state.view === "invite" || state.view === "coach-profile") {
+      if (!state.authReady) { state.view = "boot"; return; }
+      if (!isLoggedIn()) { state.view = "login"; return; }
+      return;
+    }
     if (state.view === "rate") {
       if (!state.authReady) { state.view = "boot"; return; }
       if (!isLoggedIn()) { state.view = "login"; return; }
@@ -1087,6 +1116,7 @@
     if (empty) empty.classList.toggle("hidden", !(signed && !hasCard));
     $("home-card-btn").classList.toggle("hidden", !hasCard);
     if ($("req-ask-home-btn")) $("req-ask-home-btn").classList.toggle("hidden", !hasCard);
+    if ($("home-coach-profile-btn")) $("home-coach-profile-btn").classList.toggle("hidden", !state.isCertifiedRater);
     if ($("home-admin-btn")) $("home-admin-btn").classList.toggle("hidden", !state.isAdmin);
     if ($("home-certified-badge")) $("home-certified-badge").classList.toggle("hidden", !state.isCertifiedRater);
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
@@ -4323,7 +4353,7 @@
   function render() {
     parseRoute();
     var visual = (state.view === "admin-view" || state.view === "rate") ? "card" : state.view;
-    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot", "admin", "unavailable", "legal"].forEach(function (name) {
+    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot", "admin", "unavailable", "legal", "coaches", "coach", "coach-profile", "invite"].forEach(function (name) {
       var el = $("view-" + name);
       if (el) el.classList.toggle("hidden", visual !== name);
     });
@@ -4345,6 +4375,10 @@
     if (state.view === "share") renderShare();
     if (state.view === "admin" && window.PadelAdmin && PadelAdmin.render) PadelAdmin.render();
     if (state.view === "legal" && window.PadelLegal && PadelLegal.renderPage) PadelLegal.renderPage();
+    if (state.view === "coaches" && window.PadelCoaches) PadelCoaches.loadDirectory();
+    if (state.view === "coach" && window.PadelCoaches) PadelCoaches.loadCoach(state.coachId);
+    if (state.view === "coach-profile" && window.PadelCoaches) PadelCoaches.loadEditor();
+    if (state.view === "invite" && window.PadelCoaches) PadelCoaches.renderInvite();
     if (window.PadelLegal && PadelLegal.renderChrome) PadelLegal.renderChrome(state);
     renderAccountChip();
     var showcase = visual === "card" || visual === "pair";
@@ -4372,6 +4406,17 @@
     }
     $("start-quiz").addEventListener("click", function () { startQuiz(true); });
     $("home-card-btn").addEventListener("click", function () { go("card"); });
+    if ($("home-coaches-btn")) $("home-coaches-btn").addEventListener("click", function () { go("coaches"); });
+    if ($("home-coach-profile-btn")) $("home-coach-profile-btn").addEventListener("click", function () { go("coach-profile"); });
+    if ($("coaches-back")) $("coaches-back").addEventListener("click", function () { go("home"); });
+    if ($("coach-back")) $("coach-back").addEventListener("click", function () { go("coaches"); });
+    document.addEventListener("click", function (ev) {
+      var back = ev.target && ev.target.closest && ev.target.closest("[data-go]");
+      if (back) {
+        ev.preventDefault();
+        go(back.getAttribute("data-go"));
+      }
+    });
     $("quiz-back").addEventListener("click", function () {
       if (state.quizIndex > 0) {
         state.quizIndex -= 1;
@@ -4631,8 +4676,13 @@
             var wantsAdmin = hash.indexOf("admin") === 0;
             var onLegal = hash === "terms" || hash === "privacy" || hash === "copyright";
             var onRate = hash.indexOf("rate/") === 0;
+            var onInvite = hash.indexOf("invite/") === 0 || (window.PadelCoaches && PadelCoaches.peekInviteToken && PadelCoaches.peekInviteToken());
+            var onCoaches = hash === "coaches" || hash.indexOf("coach") === 0;
             if (source === "sign-in") {
-              if (onLegal || onRate) render();
+              if (onInvite) {
+                render();
+                if (window.PadelCoaches && PadelCoaches.claimPendingInvite) PadelCoaches.claimPendingInvite();
+              } else if (onLegal || onRate || onCoaches) render();
               else if (wantsAdmin && state.isAdmin) go("admin");
               else go(state.profile && state.levelId ? "card" : "home");
             } else {
@@ -4753,6 +4803,45 @@
         if (state.view === "card" || state.view === "rate") renderCard();
         else if (state.view === "pair") renderPair();
         else if (state.view === "home") renderHome();
+      }
+    });
+  }
+  if (window.PadelCoaches) {
+    PadelCoaches.init({
+      showToast: showToast,
+      go: go,
+      isRater: function () { return !!state.isCertifiedRater; },
+      isLoggedIn: isLoggedIn,
+      regionLabel: function (id) { return (LABELS.region && LABELS.region[id]) || id || ""; },
+      playerPhoto: function () { return (state.photo) || (state.profile && state.profile.photo) || ""; },
+      weightedLevel: function (quizId, aiLevel, certLevels) {
+        var w = computeWeightedLevel(quizId, aiLevel ? { l: aiLevel } : null, certLevels || []);
+        return w || null;
+      },
+      uploadPhoto: function (file) {
+        return uploadToCloudinary(file, function () {}, {
+          resourceType: "image",
+          preset: CLOUDINARY.photoPreset,
+          timeout: 60000
+        }).then(function (res) { return res && res.secure_url; });
+      },
+      openPlayerCard: function (player) {
+        if (!player) return;
+        var card = {
+          levelId: player.levelId,
+          profile: Object.assign({}, player.profile || {}, player.ai_level ? { ai: { l: player.ai_level } } : {}),
+          videos: []
+        };
+        try {
+          location.hash = "#/p/" + toBase64Url(JSON.stringify(compactPlayer(card, true)));
+        } catch (err) {
+          state.publicCard = card;
+          state.view = "card";
+          render();
+        }
+      },
+      onClaimed: function () {
+        loadAccountFlags().then(function () { renderAccountChip(); });
       }
     });
   }

@@ -245,29 +245,58 @@
     }
     $("req-picker-list").innerHTML = '<p class="note">טוענים את רשימת המוסמכים…</p>';
     if ($("req-picker-msg")) $("req-picker-msg").value = "";
+    if ($("req-picker-search")) $("req-picker-search").value = "";
     box.classList.remove("hidden");
-    loadRaters().then(function (list) {
-      if (!list.length) {
-        $("req-picker-list").innerHTML = '<p class="note">אין כרגע מוסמכים זמינים.</p>';
-        return;
-      }
-      $("req-picker-list").innerHTML = list.map(function (r) {
-        var self = !!r.is_self;
-        var ready = !!r.has_email && !self;
-        var pending = (cache.mine || []).some(function (q) {
-          return q.rater_id === r.id && q.status === "pending";
-        });
-        var cls = "req-rater" + (ready ? "" : " is-soon") + (pending ? " is-pending" : "") + (self ? " is-self" : "");
-        var badge = self ? "זה החשבון המחובר" : (ready ? (pending ? "בקשה ממתינה" : "") : "בקרוב");
-        return '<button type="button" class="' + cls + '" data-rater-id="' + escapeHtml(r.id) + '"' +
-          (ready && !pending ? "" : " disabled") + ">" +
-          "<strong>" + escapeHtml(r.full_name) + "</strong>" +
-          (badge ? '<span>' + badge + "</span>" : "") +
-        "</button>";
-      }).join("");
+    loadRaters().then(function () {
+      paintPickerList();
     }).catch(function (err) {
       hooks.showToast(hebrewError(err));
     });
+  }
+
+  function paintPickerList() {
+    var root = $("req-picker-list");
+    if (!root) return;
+    var list = cache.raters || [];
+    var q = (($("req-picker-search") || {}).value || "").trim().toLowerCase();
+    if (q) {
+      list = list.filter(function (r) {
+        var clubs = (r.clubs || []).join(" ");
+        var blob = [r.full_name, clubs, r.city].join(" ").toLowerCase();
+        return blob.indexOf(q) !== -1;
+      });
+    }
+    if (!list.length) {
+      root.innerHTML = '<p class="note">' + ((cache.raters || []).length ? "אין מוסמכים שתואמים לחיפוש." : "אין כרגע מוסמכים זמינים.") + "</p>";
+      return;
+    }
+    root.innerHTML = list.map(function (r) {
+      var self = !!r.is_self;
+      var ready = !!r.has_email && !self;
+      var pending = (cache.mine || []).some(function (q) {
+        return q.rater_id === r.id && q.status === "pending";
+      });
+      var cls = "req-rater coach-tile" + (ready ? "" : " is-soon") + (pending ? " is-pending" : "") + (self ? " is-self" : "") + (picked[r.id] ? " is-on" : "");
+      var badge = self ? "זה החשבון המחובר" : (ready ? (pending ? "בקשה ממתינה" : "") : "בקרוב");
+      var photo = r.photo
+        ? '<img class="coach-tile-photo" alt="" src="' + escapeHtml(r.photo) + '">'
+        : '<span class="coach-tile-photo is-fallback" aria-hidden="true">★</span>';
+      var clubs = (r.clubs || []).filter(Boolean).join(" · ");
+      var years = "";
+      if (r.years_experience === 1) years = "שנת אימון אחת";
+      else if (r.years_experience) years = r.years_experience + " שנות אימון";
+      return '<button type="button" class="' + cls + '" data-rater-id="' + escapeHtml(r.id) + '"' +
+        (ready && !pending ? "" : " disabled") + ">" +
+        photo +
+        '<div class="coach-tile-body">' +
+          '<div class="coach-tile-top"><strong>' + escapeHtml(r.full_name || "מוסמך") + "</strong>" +
+            (badge ? '<span class="coach-badge">' + escapeHtml(badge) + "</span>" : "") +
+          "</div>" +
+          (clubs ? '<p class="coach-tile-clubs">' + escapeHtml(clubs) + "</p>" : "") +
+          (years ? '<p class="coach-tile-years">' + escapeHtml(years) + "</p>" : "") +
+        "</div>" +
+      "</button>";
+    }).join("");
   }
 
   function submitPicker() {
@@ -445,6 +474,7 @@
     if ($("req-ask-home-btn")) $("req-ask-home-btn").addEventListener("click", openPicker);
     if ($("req-picker-cancel")) $("req-picker-cancel").addEventListener("click", closePicker);
     if ($("req-picker-send")) $("req-picker-send").addEventListener("click", submitPicker);
+    if ($("req-picker-search")) $("req-picker-search").addEventListener("input", paintPickerList);
 
     if ($("req-home-banner")) $("req-home-banner").addEventListener("click", function (ev) {
       ev.preventDefault();

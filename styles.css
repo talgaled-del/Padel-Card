@@ -2120,3 +2120,219 @@ body:has(#legal-pending-bar:not(.hidden)) #app { padding-bottom: calc(72px + var
 .req-send-result .req-mail-row { display: grid; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line-strong); }
 .req-send-result .req-mail-row:last-of-type { border-bottom: 0; }
 .req-mine-mail { display: block; margin-top: 4px; font-size: 0.75rem; color: #c8ff3c; font-weight: 700; }
+
+/* v22 certified rater profiles, directory, invites, picker cards */
+.coach-search {
+  width: 100%;
+  margin: 4px 0 16px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line-strong);
+  background: rgba(8, 20, 14, 0.75);
+  color: var(--text);
+  font: inherit;
+}
+.coach-search::placeholder { color: var(--muted); }
+
+.coaches-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.coach-tile {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 20px;
+  text-decoration: none;
+  color: inherit;
+  background: linear-gradient(180deg, rgba(16, 36, 28, 0.96), rgba(10, 24, 18, 0.96));
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+}
+button.coach-tile, .req-rater.coach-tile {
+  width: 100%;
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+}
+.coach-tile.is-on {
+  border-color: rgba(200, 255, 60, 0.55);
+  box-shadow: 0 0 0 1px rgba(200, 255, 60, 0.25), 0 10px 28px rgba(0, 0, 0, 0.22);
+}
+.coach-tile.is-soon, .coach-tile.is-self, .coach-tile.is-pending { opacity: 0.62; }
+.coach-tile-photo {
+  width: 76px;
+  height: 76px;
+  border-radius: 18px;
+  object-fit: cover;
+  background: #12201a;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: var(--gold);
+}
+.coach-tile-photo.is-fallback { font-size: 1.2rem; }
+.coach-tile-body { min-width: 0; }
+.coach-tile-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.coach-tile-top strong { font-size: 1.05rem; }
+.coach-tile-meta, .coach-tile-clubs, .coach-tile-years {
+  margin: 2px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.coach-tile-clubs { color: var(--text); font-weight: 600; }
+
+.coach-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffe7a3, #f0c14a);
+  color: #3a2808;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.coach-badge-lg { padding: 5px 10px; font-size: 0.75rem; margin-bottom: 8px; }
+
+.coach-card {
+  border-radius: 28px;
+  overflow: hidden;
+  background: #0c1c16;
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+}
+.coach-card-hero {
+  position: relative;
+  min-height: 280px;
+  display: flex;
+  align-items: flex-end;
+}
+.coach-card-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.coach-card-photo.is-fallback {
+  display: grid;
+  place-items: center;
+  font-size: 4rem;
+  font-weight: 800;
+  color: var(--gold);
+  background: linear-gradient(160deg, #163228, #0c1c16);
+}
+.coach-card-hero-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 20%, rgba(7, 18, 14, 0.92));
+}
+.coach-card-hero-text {
+  position: relative;
+  z-index: 1;
+  padding: 20px 18px 18px;
+}
+.coach-card-hero-text h1 { margin: 0 0 4px; font-size: 1.85rem; line-height: 1.15; }
+.coach-card-hero-text p { margin: 0; color: rgba(243, 247, 241, 0.86); }
+.coach-player-badge {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1;
+  min-width: 78px;
+  padding: 8px 8px 7px;
+  border-radius: 16px;
+  text-align: center;
+  background: linear-gradient(180deg, #c8ff3c, #9ad62a);
+  color: #08140c;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+.coach-player-badge b {
+  display: block;
+  font-family: "Oswald", "Heebo", sans-serif;
+  font-size: 1.45rem;
+  line-height: 0.95;
+}
+.coach-player-badge span { display: block; font-size: 0.62rem; font-weight: 800; margin-top: 3px; }
+.coach-card-body { padding: 8px 16px 20px; }
+.coach-card-cred { margin: 0 0 8px; font-weight: 700; color: var(--gold); }
+.coach-bio { margin: 0; line-height: 1.7; }
+.coach-card-actions { display: grid; gap: 8px; margin-top: 16px; }
+
+.coach-edit { display: grid; gap: 4px; margin-top: 12px; }
+.coach-edit input[type="text"],
+.coach-edit input[type="tel"],
+.coach-edit input[type="number"],
+.coach-edit select,
+.coach-edit textarea {
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(8, 20, 14, 0.8);
+  color: var(--text);
+  font: inherit;
+}
+.coach-audiences {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.coach-audiences label, .coach-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+.coach-edit-photo-wrap { margin-bottom: 8px; }
+.coach-edit-photo {
+  width: 112px;
+  height: 112px;
+  border-radius: 24px;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  background: #12201a;
+  color: var(--gold);
+  font-weight: 800;
+  font-size: 1.6rem;
+}
+.coach-edit-status { font-weight: 700; color: var(--muted); }
+.coach-edit-status.is-ready { color: var(--lime); }
+.coach-invite-panel { padding: 12px 0 24px; }
+.coach-invite-panel h1 { margin: 0 0 8px; }
+
+.admin-invite-box {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(8, 20, 14, 0.6);
+  border: 1px solid var(--line-strong);
+  display: grid;
+  gap: 8px;
+}
+.admin-invite-box textarea,
+.admin-invite-box input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(7, 18, 14, 0.8);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.admin-invite-box input { direction: ltr; text-align: left; overflow-x: auto; }
+.admin-invite-box textarea { min-height: 9.5rem; resize: vertical; }
+.back-link { margin-bottom: 8px; }
+
+#req-picker-list.req-rater-list { display: grid; gap: 10px; }

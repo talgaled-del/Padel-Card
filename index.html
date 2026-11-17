@@ -11,8 +11,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect rx='8' width='32' height='32' fill='%23c8ff3c'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-size='16' font-family='Arial' font-weight='800' fill='%2308140c'%3EP%3C/text%3E%3C/svg%3E" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <link rel="stylesheet" href="v21/styles.css" />
-  <link rel="stylesheet" href="v21/cards.css" />
+  <link rel="stylesheet" href="v22/styles.css" />
+  <link rel="stylesheet" href="v22/cards.css" />
 </head>
 <body>
   <div id="app">
@@ -64,6 +64,8 @@
         </button>
         <button class="btn btn-ghost hidden" id="home-card-btn" type="button" style="margin-top:10px">הכרטיס שלי</button>
         <button class="btn btn-star-ghost hidden" id="req-ask-home-btn" type="button" style="margin-top:10px">בקש דירוג ממוסמך</button>
+        <button class="btn btn-ghost hidden" id="home-coach-profile-btn" type="button" style="margin-top:10px">הפרופיל שלי כמוסמך</button>
+        <button class="btn btn-ghost" id="home-coaches-btn" type="button" style="margin-top:10px">המוסמכים שלנו</button>
         <button class="btn btn-ghost hidden" id="home-admin-btn" type="button" style="margin-top:10px">ניהול משתמשים</button>
         <button class="btn btn-ghost" id="home-login-btn" type="button" style="margin-top:10px">התחברות</button>
         <div class="auth-status hidden" id="home-auth-status">
@@ -605,6 +607,92 @@
       </div>
     </section>
 
+
+    <section id="view-coaches" class="view hidden">
+      <button type="button" class="text-btn back-link" id="coaches-back" data-go="home">חזרה</button>
+      <div class="eyebrow">המומחים שלנו</div>
+      <h1>המוסמכים שלנו</h1>
+      <p class="lede">מאמנים ומוסמכי דירוג שמלווים שחקנים בכרטיס. בחרו כרטיס כדי להכיר מועדון, ניסיון וסגנון הוראה.</p>
+      <input id="coaches-search" type="search" class="coach-search" placeholder="חיפוש לפי שם או מועדון" autocomplete="off" />
+      <div id="coaches-grid" class="coaches-grid"></div>
+    </section>
+
+    <section id="view-coach" class="view hidden">
+      <button type="button" class="text-btn back-link" id="coach-back">חזרה</button>
+      <div id="coach-card-root"></div>
+    </section>
+
+    <section id="view-coach-profile" class="view hidden">
+      <button type="button" class="text-btn back-link" data-go="home">חזרה</button>
+      <div class="eyebrow">כרטיס מוסמך</div>
+      <h1 id="coach-edit-name">הפרופיל שלי כמוסמך</h1>
+      <p class="lede">הפרופיל הזה מופיע במדריך המוסמכים ובבקשות דירוג. מלאו את הפרטים כדי ששחקנים יכירו אתכם.</p>
+      <p class="coach-edit-status" id="coach-edit-status"></p>
+      <a class="text-btn hidden" id="coach-edit-public-link" href="#/coaches">לצפייה בכרטיס הציבורי</a>
+
+      <div class="coach-edit">
+        <div class="coach-edit-photo-wrap">
+          <div id="coach-edit-photo-preview"></div>
+          <div class="btn-row two" style="margin-top:10px">
+            <label class="btn btn-ghost" for="coach-edit-photo-file">העלאת תמונה</label>
+            <button type="button" class="btn btn-ghost" id="coach-edit-use-player-photo">שימוש בתמונת הכרטיס</button>
+          </div>
+          <input type="file" id="coach-edit-photo-file" accept="image/*" class="hidden" />
+          <input type="hidden" id="coach-edit-photo-url" />
+        </div>
+
+        <label class="certified-note-label" for="coach-edit-clubs">מועדונים שבהם אתם מאמנים</label>
+        <textarea id="coach-edit-clubs" rows="2" maxlength="400" placeholder="למשל פאדל רעננה, פאדל הרצליה"></textarea>
+
+        <label class="certified-note-label" for="coach-edit-city">עיר</label>
+        <input id="coach-edit-city" type="text" maxlength="80" placeholder="למשל הוד השרון" />
+
+        <label class="certified-note-label" for="coach-edit-region">אזור</label>
+        <select id="coach-edit-region">
+          <option value="">בחרו אזור</option>
+          <option value="north">צפון</option>
+          <option value="haifa">חיפה והקריות</option>
+          <option value="sharon">שרון</option>
+          <option value="center">מרכז</option>
+          <option value="telaviv">תל אביב</option>
+          <option value="shfela">שפלה</option>
+          <option value="jerusalem">ירושלים</option>
+          <option value="south">דרום</option>
+        </select>
+
+        <label class="certified-note-label" for="coach-edit-years">שנות ניסיון באימון</label>
+        <input id="coach-edit-years" type="number" min="0" max="60" inputmode="numeric" placeholder="למשל 8" />
+
+        <label class="certified-note-label" for="coach-edit-cert">הסמכה או קורס (לא חובה)</label>
+        <input id="coach-edit-cert" type="text" maxlength="160" placeholder="למשל מאמן מוסמך איגוד הפאדל" />
+
+        <p class="certified-note-label">את מי אתם מלמדים</p>
+        <div id="coach-edit-audiences" class="coach-audiences">
+          <label><input type="checkbox" value="kids" /> ילדים</label>
+          <label><input type="checkbox" value="beginners" /> מתחילים</label>
+          <label><input type="checkbox" value="advanced" /> מתקדמים</label>
+          <label><input type="checkbox" value="competitive" /> תחרותיים</label>
+        </div>
+
+        <label class="certified-note-label" for="coach-edit-bio">כמה מילים עליכם</label>
+        <textarea id="coach-edit-bio" rows="4" maxlength="600" placeholder="ספרו בקצרה על סגנון האימון, הניסיון, ולמי אתם הכי אוהבים לעבוד."></textarea>
+
+        <label class="certified-note-label" for="coach-edit-contact">וואטסאפ או טלפון לשיעורים (לא חובה)</label>
+        <input id="coach-edit-contact" type="tel" dir="ltr" maxlength="40" placeholder="0500000000" />
+        <label class="coach-check"><input type="checkbox" id="coach-edit-contact-public" /> הציגו את פרטי הקשר בכרטיס הציבורי</label>
+        <label class="coach-check"><input type="checkbox" id="coach-edit-hide-player" /> אל תציגו את דירוג השחקן שלי בכרטיס המוסמך</label>
+
+        <button type="button" class="btn btn-primary" id="coach-edit-save" style="margin-top:16px">שמירת הפרופיל</button>
+      </div>
+    </section>
+
+    <section id="view-invite" class="view hidden">
+      <div class="coach-invite-panel">
+        <h1>הזמנה למוסמך</h1>
+        <p class="lede">טוענים את ההזמנה…</p>
+      </div>
+    </section>
+
     <section id="view-legal" class="view hidden"></section>
 
     <footer class="site-footer hidden" id="site-footer">
@@ -747,6 +835,7 @@
       <h2 id="req-picker-title">בקש דירוג ממוסמך</h2>
       <div id="req-picker-form">
         <p class="lede">בחרו מוסמך אחד או יותר. נשלח אליהם מייל עם קישור לכרטיס שלכם.</p>
+        <input id="req-picker-search" type="search" class="coach-search" placeholder="חיפוש לפי שם או מועדון" autocomplete="off" />
         <div id="req-picker-list" class="req-rater-list"></div>
         <label class="certified-note-label" for="req-picker-msg">הודעה (לא חובה)</label>
         <textarea id="req-picker-msg" maxlength="200" rows="3" placeholder="למשל: נשמח לחוות דעת אחרי אימון משותף."></textarea>
@@ -758,16 +847,17 @@
       <div id="req-picker-result" class="req-send-result hidden"></div>
     </div>
   </div>
-  <script src="v21/config.js"></script>
+  <script src="v22/config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0"></script>
-  <script src="v21/quiz.js"></script>
-  <script src="v21/players.js"></script>
-  <script src="v21/track.js"></script>
-  <script src="v21/auth.js"></script>
-  <script src="v21/admin.js"></script>
-  <script src="v21/legal.js"></script>
-  <script src="v21/certified.js"></script>
-  <script src="v21/requests.js"></script>
-  <script src="v21/app.js"></script>
+  <script src="v22/quiz.js"></script>
+  <script src="v22/players.js"></script>
+  <script src="v22/track.js"></script>
+  <script src="v22/auth.js"></script>
+  <script src="v22/admin.js"></script>
+  <script src="v22/legal.js"></script>
+  <script src="v22/certified.js"></script>
+  <script src="v22/requests.js"></script>
+  <script src="v22/coaches.js"></script>
+  <script src="v22/app.js"></script>
 </body>
 </html>

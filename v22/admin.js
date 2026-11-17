@@ -296,11 +296,13 @@
           "<div><dt>נוסף</dt><dd>" + escapeHtml(fmtDate(r.created_at)) + "</dd></div>" +
         "</dl>" +
         '<div class="admin-user-actions">' +
+          '<button type="button" class="btn btn-ghost" data-rater-act="invite">צור קישור הזמנה</button>' +
           '<button type="button" class="btn btn-ghost" data-rater-act="email">שיוך אימייל</button>' +
           '<button type="button" class="btn btn-ghost" data-rater-act="' + (active ? "deactivate" : "enable") + '">' +
             (active ? "השבתה" : "הפעלה") + "</button>" +
           '<button type="button" class="btn btn-danger" data-rater-act="delete">הסרה</button>' +
         "</div>" +
+        '<div class="admin-invite-box hidden" data-invite-box="' + escapeHtml(r.id) + '"></div>' +
       "</article>";
     }).join("");
   }
@@ -449,6 +451,60 @@
     });
   }
 
+  function inviteMessageFor(name, link) {
+    if (window.PadelCoaches && PadelCoaches.inviteMessage) return PadelCoaches.inviteMessage(name, link);
+    return "שלום " + (name || "מוסמך") + "\n\n" + (link || "");
+  }
+
+  function formatInviteExpiry(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleString("he-IL", {
+      timeZone: "Asia/Jerusalem",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function localInviteUrl(token) {
+    if (!token) return "";
+    return location.origin + location.pathname + "#/invite/" + token;
+  }
+
+  function paintInviteBox(raterId, payload) {
+    var box = document.querySelector('[data-invite-box="' + raterId + '"]');
+    if (!box || !payload) return;
+    var url = localInviteUrl(payload.token) || payload.url || "";
+    var msg = inviteMessageFor(payload.rater_name, url);
+    var exp = formatInviteExpiry(payload.expires_at);
+    box.classList.remove("hidden");
+    box.innerHTML =
+      '<p><strong>קישור הזמנה חד-פעמי</strong>' + (exp ? " · בתוקף עד " + escapeHtml(exp) : "") + "</p>" +
+      '<input type="text" dir="ltr" readonly value="' + escapeHtml(url) + '" />' +
+      '<div class="btn-row two">' +
+        '<button type="button" class="btn btn-primary" data-copy-invite="url">העתקת הקישור</button>' +
+        '<button type="button" class="btn btn-ghost" data-copy-invite="wa">העתקת הודעת וואטסאפ</button>' +
+      "</div>" +
+      '<textarea dir="auto" readonly>' + escapeHtml(msg) + "</textarea>";
+    box.__inviteUrl = url;
+    box.__inviteMsg = msg;
+  }
+
+  function createRaterInvite(rater) {
+    if (!rater || !rater.id) return;
+    setBusy(true);
+    rpc("admin_create_rater_invite", { p_rater_id: rater.id }).then(function (data) {
+      paintInviteBox(rater.id, data || {});
+      hooks.showToast("קישור ההזמנה מוכן להעתקה");
+    }).catch(function (err) {
+      hooks.showToast(hebrewError(err));
+    }).then(function () { setBusy(false); });
+  }
+
   function findRater(id) {
     return (cache.raters || []).filter(function (r) { return r.id === id; })[0];
   }
@@ -456,6 +512,10 @@
   function onRaterAction(act, raterId) {
     var rater = findRater(raterId);
     if (!rater) return;
+    if (act === "invite") {
+      createRaterInvite(rater);
+      return;
+    }
     if (act === "email") {
       openDialog({
         act: "cert-email",
@@ -687,6 +747,18 @@
     var raters = $("admin-raters");
     if (raters) {
       raters.addEventListener("click", function (ev) {
+        var copyBtn = ev.target.closest("[data-copy-invite]");
+        if (copyBtn) {
+          var box = copyBtn.closest("[data-invite-box]");
+          var kind = copyBtn.getAttribute("data-copy-invite");
+          var text = kind === "wa" ? (box && box.__inviteMsg) : (box && box.__inviteUrl);
+          if (text && navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+              hooks.showToast(kind === "wa" ? "הודעת הוואטסאפ הועתקה" : "הקישור הועתק");
+            }).catch(function () { hooks.showToast("ההעתקה נכשלה"); });
+          } else if (text) hooks.showToast("העתיקו ידנית מהתיבה");
+          return;
+        }
         var btn = ev.target.closest("[data-rater-act]");
         if (!btn) return;
         var card = ev.target.closest("[data-rater-id]");
