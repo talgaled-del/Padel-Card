@@ -788,6 +788,26 @@
     }
     state.rateRequestId = null;
 
+    if (parts[0] === "card" && parts[1]) {
+      var sid = parts[1];
+      try { sid = decodeURIComponent(parts[1]); } catch (err) {}
+      if (state.sharedCardId !== sid) {
+        state.publicCard = null;
+        state.courtside = null;
+        state.sharedReady = null;
+      }
+      state.sharedCardId = sid;
+      state.view = "card";
+      return;
+    }
+    state.sharedCardId = null;
+
+    if (parts[0] === "scan") {
+      state.view = "scan";
+      gateOwnerViews();
+      return;
+    }
+
     if (parts[0] === "coaches") {
       if (state.isCertifiedRater) {
         state.view = "home";
@@ -817,7 +837,7 @@
     state.coachId = null;
 
     var route = parts[0] || "home";
-    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1, terms: 1, privacy: 1, copyright: 1, rate: 1, coaches: 1, coach: 1, "coach-profile": 1, invite: 1 };
+    var allowed = { home: 1, quiz: 1, result: 1, profile: 1, card: 1, pair: 1, share: 1, login: 1, admin: 1, terms: 1, privacy: 1, copyright: 1, rate: 1, coaches: 1, coach: 1, "coach-profile": 1, invite: 1, scan: 1 };
     if (state.isCertifiedRater && !isVisitorView() && (route === "quiz" || route === "result" || route === "profile" || route === "card" || route === "share" || route === "pair" || route === "coaches")) {
       state.view = "home";
       if ((location.hash || "#/") !== "#/") location.hash = "#/";
@@ -841,6 +861,13 @@
   function gateOwnerViews() {
     if (isVisitorView()) return;
     if (state.view === "legal") return;
+    if (state.view === "card" && state.sharedCardId) return;
+    if (state.view === "scan") {
+      if (!state.authReady) { state.view = "boot"; return; }
+      if (!isLoggedIn()) { state.view = "login"; return; }
+      if (!state.isCertifiedRater) { state.view = "home"; return; }
+      return;
+    }
     if (state.view === "coaches" || state.view === "coach") return;
     if (state.view === "invite" || state.view === "coach-profile") {
       if (!state.authReady) { state.view = "boot"; return; }
@@ -1136,6 +1163,7 @@
     if ($("home-admin-btn")) $("home-admin-btn").classList.toggle("hidden", !state.isAdmin);
     if ($("home-certified-badge")) $("home-certified-badge").classList.toggle("hidden", !rater);
     if ($("home-coaches-btn")) $("home-coaches-btn").classList.toggle("hidden", rater);
+    if ($("scan-card-btn")) $("scan-card-btn").classList.toggle("hidden", !rater);
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
     renderAccountChip();
     if (window.PadelRequests && isLoggedIn()) PadelRequests.refresh();
@@ -4062,6 +4090,10 @@
     root.innerHTML = "";
     root.appendChild(createPremiumCard(data, { compact: false, partner: partner, allowReupload: owns }));
     syncCertifiedRateBar(data, owns);
+    if (window.PadelCourtside) {
+      PadelCourtside.paintBar(state.courtside);
+      if (state.courtside && $("certified-rate-bar")) $("certified-rate-bar").classList.add("hidden");
+    }
     if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
     renderAccountChip();
     if (window.PadelRequests && isLoggedIn()) PadelRequests.refresh();
@@ -4368,10 +4400,52 @@
     });
   }
 
+  var sharedFetch = 0;
+  function loadSharedCard(id) {
+    if (!id) return;
+    if (state.publicCard && shareCardId(state.publicCard) === id && state.sharedReady === id) {
+      renderCard();
+      if (window.PadelCourtside && state.courtside) PadelCourtside.paintBar(state.courtside);
+      return;
+    }
+    var root = $("card-root");
+    if (root && !state.publicCard) root.innerHTML = '<p class="lede">טוענים את כרטיס השחקן…</p>';
+    var c = getAuthClient();
+    if (!c) {
+      showToast("לא ניתן לטעון את הכרטיס");
+      return;
+    }
+    var seq = ++sharedFetch;
+    var req = state.isCertifiedRater
+      ? c.rpc("get_card_for_courtside", { p_card_id: id })
+      : c.rpc("get_shared_card", { p_card_id: id });
+    req.then(function (res) {
+      if (seq !== sharedFetch) return;
+      if (res.error) throw res.error;
+      var data = res.data || {};
+      var card = data.card || null;
+      if (!card) throw new Error("card not found");
+      state.publicCard = card;
+      state.sharedReady = id;
+      state.courtside = state.isCertifiedRater ? data : null;
+      renderCard();
+      applyShareAvailability();
+      if (window.PadelCourtside) PadelCourtside.paintBar(state.courtside);
+    }).catch(function (err) {
+      if (seq !== sharedFetch) return;
+      state.publicCard = null;
+      state.courtside = null;
+      state.sharedReady = null;
+      var msg = (window.PadelCourtside && PadelCourtside.hebrewError(err)) || "כרטיס השחקן לא נמצא";
+      showToast(msg);
+      if (root) root.innerHTML = '<p class="lede">' + msg + "</p>";
+    });
+  }
+
   function render() {
     parseRoute();
     var visual = (state.view === "admin-view" || state.view === "rate") ? "card" : state.view;
-    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot", "admin", "unavailable", "legal", "coaches", "coach", "coach-profile", "invite"].forEach(function (name) {
+    ["home", "quiz", "result", "profile", "card", "pair", "share", "login", "boot", "admin", "unavailable", "legal", "coaches", "coach", "coach-profile", "invite", "scan"].forEach(function (name) {
       var el = $("view-" + name);
       if (el) el.classList.toggle("hidden", visual !== name);
     });
@@ -4387,6 +4461,7 @@
     if (state.view === "rate") openRateRequest();
     if (state.view === "card" || state.view === "admin-view") {
       if (state.view === "admin-view") openAdminCardPreview();
+      else if (state.sharedCardId) loadSharedCard(state.sharedCardId);
       else renderCard();
     }
     if (state.view === "pair") renderPair();
@@ -4397,6 +4472,8 @@
     if (state.view === "coach" && window.PadelCoaches) PadelCoaches.loadCoach(state.coachId);
     if (state.view === "coach-profile" && window.PadelCoaches) PadelCoaches.loadEditor();
     if (state.view === "invite" && window.PadelCoaches) PadelCoaches.renderInvite();
+    if (state.view === "scan" && window.PadelCourtside) PadelCourtside.openScan();
+    else if (window.PadelCourtside) PadelCourtside.stopScan();
     if (window.PadelLegal && PadelLegal.renderChrome) PadelLegal.renderChrome(state);
     renderAccountChip();
     var showcase = visual === "card" || visual === "pair";
@@ -4428,6 +4505,11 @@
     }
     $("start-quiz").addEventListener("click", function () { startQuiz(true); });
     $("home-card-btn").addEventListener("click", function () { go("card"); });
+    if ($("show-card-btn")) $("show-card-btn").addEventListener("click", function () {
+      var data = state.publicCard ? state.publicCard : currentCardData();
+      if (window.PadelCourtside) PadelCourtside.openShow(data);
+    });
+    if ($("scan-card-btn")) $("scan-card-btn").addEventListener("click", function () { go("scan"); });
     if ($("home-coaches-btn")) $("home-coaches-btn").addEventListener("click", function () { go("coaches"); });
     if ($("home-coach-profile-btn")) $("home-coach-profile-btn").addEventListener("click", function () { go("coach-profile"); });
     if ($("coaches-back")) $("coaches-back").addEventListener("click", function () { go("home"); });
@@ -4704,18 +4786,23 @@
             var onCoachCard = hash.indexOf("coach/") === 0;
             var onCoachProfile = hash === "coach-profile";
             var onCoachesDir = hash === "coaches";
+            var onCardShare = hash.indexOf("card/") === 0;
+            var onScan = hash === "scan";
             if (source === "sign-in") {
               if (onInvite) {
                 render();
                 if (window.PadelCoaches && PadelCoaches.claimPendingInvite) PadelCoaches.claimPendingInvite();
-              } else if (onLegal || onRate || onCoachCard || onCoachProfile) render();
+              } else if (onLegal || onRate || onCoachCard || onCoachProfile || onCardShare) render();
+              else if (onScan && state.isCertifiedRater) render();
               else if (onCoachesDir && !state.isCertifiedRater) render();
               else if (wantsAdmin && state.isAdmin) go("admin");
               else if (state.isCertifiedRater) go("home");
               else go(state.profile && state.levelId ? "card" : "home");
             } else if (state.isCertifiedRater) {
               var raterRoute = (hash.split("/")[0] || "home");
-              if (raterRoute === "quiz" || raterRoute === "result" || raterRoute === "profile" || raterRoute === "card" || raterRoute === "share" || raterRoute === "pair" || raterRoute === "coaches") go("home");
+              var stayOnCard = raterRoute === "card" && hash.indexOf("card/") === 0;
+              if (raterRoute === "scan" || stayOnCard) render();
+              else if (raterRoute === "quiz" || raterRoute === "result" || raterRoute === "profile" || raterRoute === "card" || raterRoute === "share" || raterRoute === "pair" || raterRoute === "coaches") go("home");
               else render();
             } else {
               render();
@@ -4835,6 +4922,27 @@
         if (state.view === "card" || state.view === "rate") renderCard();
         else if (state.view === "pair") renderPair();
         else if (state.view === "home") renderHome();
+      }
+    });
+  }
+  if (window.PadelCourtside) {
+    PadelCourtside.init({
+      showToast: showToast,
+      go: go,
+      isRater: function () { return !!state.isCertifiedRater; },
+      isLoggedIn: isLoggedIn,
+      cardId: shareCardId,
+      getClient: getAuthClient,
+      initials: initials,
+      weightedLabel: function (card) {
+        if (!card) return "";
+        var ratings = (window.PadelCertified && PadelCertified.cached && PadelCertified.cached(shareCardId(card))) || [];
+        var ai = overallAiForCard(card) || (card.profile && card.profile.ai) || null;
+        var w = computeWeightedLevel(card.levelId, ai, ratings);
+        return (w && w.id) || card.levelId || "";
+      },
+      openRateSheet: function (card, opts) {
+        if (window.PadelCertified && PadelCertified.openSheet) PadelCertified.openSheet(card, opts);
       }
     });
   }

@@ -15,6 +15,7 @@
   };
   var sheetCard = null;
   var sheetLevel = "";
+  var sheetOpts = {};
 
   function $(id) { return document.getElementById(id); }
 
@@ -46,6 +47,14 @@
     if (/invalid level/.test(low)) return "בחרו רמה מהסולם הישראלי.";
     if (/note too long/.test(low)) return "ההערה ארוכה מדי. עד 200 תווים.";
     if (/rating not found/.test(low)) return "לא נמצא דירוג למחיקה.";
+    if (/certified rating cooldown until/.test(low)) {
+      var iso = (String(msg).match(/(\d{4}-\d{2}-\d{2})/) || [])[1] || "";
+      var pretty = iso ? iso.slice(8, 10) + "/" + iso.slice(5, 7) + "/" + iso.slice(0, 4) : "";
+      return pretty
+        ? ("השחקן כבר קיבל דירוג מוסמך. אפשר לדרג שוב ב־" + pretty + ".")
+        : "השחקן כבר קיבל דירוג מוסמך ב־3 החודשים האחרונים.";
+    }
+    if (/card not found/.test(low)) return "כרטיס השחקן לא נמצא.";
     if (/invalid card/.test(low)) return "לא ניתן לדרג את הכרטיס הזה.";
     if (/not authorized/.test(low)) return "אין הרשאה לפעולה הזו.";
     if (/email already in use/.test(low)) return "כתובת האימייל כבר משויכת למוסמך אחר.";
@@ -250,9 +259,11 @@
     if (el) el.classList.add("hidden");
     sheetCard = null;
     sheetLevel = "";
+    sheetOpts = {};
   }
 
-  function openSheet(card) {
+  function openSheet(card, opts) {
+    sheetOpts = opts || {};
     if (!card || !canRate(card)) return;
     var id = hooks.cardId(card);
     var name = (card.profile && card.profile.name) || "השחקן";
@@ -282,7 +293,8 @@
     var btn = $("certified-sheet-save");
     if (btn) btn.disabled = true;
     var saved = null;
-    rpc("upsert_certified_rating", { p_card_id: id, p_level: sheetLevel, p_note: note })
+    var rpcName = (sheetOpts && sheetOpts.rpc) || "upsert_certified_rating";
+    rpc(rpcName, { p_card_id: id, p_level: sheetLevel, p_note: note })
       .then(function (row) {
         saved = row;
         return fetchRatings(id);
