@@ -1062,27 +1062,92 @@
     });
   }
 
-  function go(view) {
-    var next;
-    if (view === "home") next = "#/";
-    else if (view && view.charAt(0) === "#") next = view;
-    else next = "#/" + view;
+  var inAppDepth = 0;
+
+  function currentAppHref() {
+    return (location.pathname || "/") + (location.search || "") + (location.hash || "");
+  }
+
+  function isRootHomeUrl() {
     var path = location.pathname || "/";
-    var onSharePath = path !== "/" && path !== "/index.html";
-    if (onSharePath) {
-      var href = "/" + next;
-      try { history.pushState(null, "", href); render(); }
-      catch (err) { location.assign(href); }
+    var search = location.search || "";
+    var hash = location.hash || "";
+    return (path === "/" || path === "/index.html") && !search && (hash === "" || hash === "#" || hash === "#/");
+  }
+
+  function setAppUrl(href, opts) {
+    opts = opts || {};
+    href = href || "/#/";
+    if (href.charAt(0) === "#") href = "/" + href;
+    if (currentAppHref() === href || (href === "/#/" && isRootHomeUrl())) {
+      if (!opts.replaceOnly) render();
+      return true;
+    }
+    try {
+      if (opts.replace) history.replaceState(null, "", href);
+      else {
+        history.pushState(null, "", href);
+        inAppDepth += 1;
+      }
+    } catch (err) {
+      if (!opts.replaceOnly) location.assign(href);
+      return false;
+    }
+    if (!opts.replaceOnly) render();
+    return true;
+  }
+
+  function goHome() {
+    setAppUrl("/#/");
+  }
+
+  function goBack() {
+    if (inAppDepth > 0) {
+      history.back();
       return;
     }
-    if ((location.hash || "#/") === next) render();
-    else location.hash = next;
+    goHome();
+  }
+
+  function go(view) {
+    if (view === "home") { goHome(); return; }
+    var next;
+    if (view && view.charAt(0) === "#") next = view;
+    else next = "#/" + view;
+    setAppUrl("/" + next);
   }
 
   function openSharePath(path) {
     if (!path) return;
-    try { history.pushState(null, "", path); render(); }
-    catch (err) { location.assign(path); }
+    setAppUrl(path);
+  }
+
+  function normalizePublicShareUrl() {
+    var path = location.pathname || "/";
+    var search = location.search || "";
+    var onSharePath = (path !== "/" && path !== "/index.html") || /[?&](?:c|card)=/.test(search);
+    if (!onSharePath) return;
+    var href = "";
+    if (state.view === "card" && state.sharedCardId) {
+      href = "/#/card/" + encodeURIComponent(state.sharedCardId);
+    } else if (state.view === "coach" && state.coachId) {
+      href = "/#/coach/" + encodeURIComponent(state.coachId);
+    }
+    if (!href) return;
+    state.shareCode = null;
+    state.coachShareCode = null;
+    setAppUrl(href, { replace: true, replaceOnly: true });
+  }
+
+  function appRouteFromHref(href) {
+    href = String(href || "").trim();
+    if (!href) return "";
+    if (href === "#/" || href === "/#/" || href === "/#" || href === "#") return "home";
+    var hash = "";
+    if (href.indexOf("/#/") === 0) hash = href.slice(1);
+    else if (href.indexOf("#/") === 0) hash = href;
+    if (!hash) return "";
+    return hash;
   }
 
   function refreshMyShortCode() {
@@ -4544,7 +4609,9 @@
     renderCard();
     applyShareAvailability();
     paintGuestShareCta();
+    if (window.PadelLegal && PadelLegal.renderChrome) PadelLegal.renderChrome(state);
     if (window.PadelCourtside) PadelCourtside.paintBar(state.courtside);
+    normalizePublicShareUrl();
   }
 
   function loadSharedCard(id) {
@@ -4554,6 +4621,7 @@
     if (state.publicCard && state.sharedReady === readyKey) {
       renderCard();
       paintGuestShareCta();
+      if (window.PadelLegal && PadelLegal.renderChrome) PadelLegal.renderChrome(state);
       if (window.PadelCourtside && state.courtside) PadelCourtside.paintBar(state.courtside);
       return;
     }
@@ -4579,7 +4647,7 @@
           state.coachId = data.coach_id;
           state.shareCode = null;
           state.view = "coach";
-          try { history.replaceState(null, "", "/k/" + code); } catch (err) {}
+          normalizePublicShareUrl();
           if (window.PadelCoaches) PadelCoaches.loadCoach(state.coachId);
           return;
         }
@@ -4619,12 +4687,12 @@
         state.shareCode = code;
         state.coachShareCode = null;
         state.view = "card";
-        try { history.replaceState(null, "", "/c/" + code); } catch (err) {}
         loadSharedCard();
         return;
       }
       if (!data.coach_id) throw new Error("code not found");
       state.coachId = data.coach_id;
+      normalizePublicShareUrl();
       if (window.PadelCoaches) PadelCoaches.loadCoach(state.coachId);
     }).catch(function (err) {
       var box = $("coach-card-root");
@@ -4723,6 +4791,18 @@
         go(back.getAttribute("data-go"));
       }
     });
+    document.addEventListener("click", function (ev) {
+      if (ev.defaultPrevented) return;
+      if (ev.button && ev.button !== 0) return;
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+      var a = ev.target && ev.target.closest && ev.target.closest("a[href]");
+      if (!a) return;
+      var route = appRouteFromHref(a.getAttribute("href"));
+      if (!route) return;
+      ev.preventDefault();
+      if (route === "home") goHome();
+      else go(route);
+    }, true);
     $("quiz-back").addEventListener("click", function () {
       if (state.quizIndex > 0) {
         state.quizIndex -= 1;
@@ -4909,7 +4989,10 @@
     window.addEventListener("orientationchange", onViewport);
     if (window.visualViewport) window.visualViewport.addEventListener("resize", onViewport);
     window.addEventListener("hashchange", render);
-    window.addEventListener("popstate", render);
+    window.addEventListener("popstate", function () {
+      if (inAppDepth > 0) inAppDepth -= 1;
+      render();
+    });
     document.addEventListener("click", function (ev) {
       var info = ev.target && ev.target.closest && ev.target.closest(".ut-weight-info");
       if (info) {
@@ -5097,6 +5180,8 @@
   if (window.PadelLegal) {
     PadelLegal.init({
       go: go,
+      goBack: goBack,
+      goHome: goHome,
       showToast: showToast
     });
   }

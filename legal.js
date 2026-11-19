@@ -4,6 +4,8 @@
   var INTENT_KEY = "padelCard.legalIntent";
   var hooks = {
     go: function () {},
+    goBack: function () {},
+    goHome: function () {},
     showToast: function () {}
   };
   var cache = { loaded: false, accepted: false, version: "", media: false, userId: null };
@@ -143,7 +145,8 @@
   function pageHtml(key) {
     var page = PAGES[key] || PAGES.terms;
     var body = page.html;
-    return '<article class="legal-article" id="legal-article">' +
+    return '<button type="button" class="text-btn back-link" id="legal-back">חזרה</button>' +
+      '<article class="legal-article" id="legal-article">' +
       '<p class="eyebrow">' + escapeHtml(page.kicker) + "</p>" +
       "<h1>" + escapeHtml(page.title) + "</h1>" +
       body +
@@ -401,6 +404,13 @@
         hooks.go("home");
       });
     }
+    document.addEventListener("click", function (ev) {
+      var btn = ev.target && ev.target.closest && ev.target.closest("#legal-back");
+      if (!btn) return;
+      ev.preventDefault();
+      if (hooks.goBack) hooks.goBack();
+      else hooks.go("home");
+    });
     var loginBox = $("auth-legal-accept");
     if (loginBox) {
       loginBox.addEventListener("change", function () {
