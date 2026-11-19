@@ -34,13 +34,19 @@
     if (/card unavailable/.test(low)) return "הכרטיס אינו זמין.";
     if (/cannot rate own card/.test(low)) return "אי אפשר לדרג את הכרטיס של עצמכם.";
     if (/not a certified rater/.test(low)) return "רק מוסמך פעיל יכול לסרוק ולדרג.";
-    if (/invalid card/.test(low)) return "לא זיהינו כרטיס שחקן בקישור או במזהה.";
+    if (/invalid card|invalid code/.test(low)) return "לא זיהינו כרטיס שחקן בקישור או במזהה.";
+    if (/code not found/.test(low)) return "כרטיס השחקן לא נמצא.";
     if (/not authorized/.test(low)) return "אין הרשאה לפעולה הזו.";
     if (window.PadelCertified && PadelCertified.hebrewError) return PadelCertified.hebrewError(err);
     return msg || "הפעולה נכשלה. נסו שוב.";
   }
 
-  function publicCardUrl(id) {
+  function publicCardUrl(cardOrId) {
+    var card = cardOrId && typeof cardOrId === "object" ? cardOrId : null;
+    var id = card ? hooks.cardId(card) : cardOrId;
+    var code = (hooks.shareCode && hooks.shareCode(card)) || (card && card.short_code) || "";
+    if (code && window.PadelShare && PadelShare.cardUrl) return PadelShare.cardUrl(code);
+    if (id && window.PadelShare && PadelShare.cardIdFallbackUrl) return PadelShare.cardIdFallbackUrl(id);
     if (!id) return "";
     var path = (location.pathname || "/").replace(/index\.html$/, "");
     return location.origin + path + "#/card/" + encodeURIComponent(id);
@@ -49,6 +55,10 @@
   function parseCardRef(raw) {
     var text = String(raw || "").trim();
     if (!text) return "";
+    if (window.PadelShare && PadelShare.parseShareRef) {
+      var ref = PadelShare.parseShareRef(text);
+      if (ref && (ref.id || ref.code)) return ref.id || ref.code;
+    }
     var hash = "";
     try {
       if (/^https?:\/\//i.test(text)) {
@@ -129,7 +139,7 @@
     var overlay = $("show-card-overlay");
     if (!overlay || !card) return;
     var id = hooks.cardId(card);
-    var url = publicCardUrl(id);
+    var url = publicCardUrl(card) || publicCardUrl(id);
     var name = (card.profile && card.profile.name) || "שחקן";
     var photo = (card.profile && card.profile.photo) || "";
     var level = hooks.weightedLabel(card) || card.levelId || "";
@@ -177,14 +187,45 @@
     if (video) video.srcObject = null;
   }
 
-  function onScanText(text) {
-    var id = parseCardRef(text);
-    if (!id) {
-      hooks.showToast("לא זיהינו כרטיס שחקן בקוד. נסו שוב או הדביקו קישור.");
-      return;
+  function openScannedRef(text) {
+    var ref = window.PadelShare && PadelShare.parseShareRef ? PadelShare.parseShareRef(text) : null;
+    if (ref && ref.kind === "card-code") {
+      stopScan();
+      if (hooks.openSharePath) hooks.openSharePath("/c/" + ref.code);
+      else hooks.go("card/" + encodeURIComponent(ref.code));
+      return true;
     }
+    if (ref && ref.kind === "coach-code") {
+      stopScan();
+      if (hooks.openSharePath) hooks.openSharePath("/k/" + ref.code);
+      else hooks.go("coach/" + encodeURIComponent(ref.id || ref.code));
+      return true;
+    }
+    if (ref && ref.kind === "card-id") {
+      stopScan();
+      hooks.go("card/" + encodeURIComponent(ref.id));
+      return true;
+    }
+    if (ref && ref.kind === "coach-id") {
+      stopScan();
+      hooks.go("coach/" + encodeURIComponent(ref.id));
+      return true;
+    }
+    if (ref && ref.kind === "legacy-p") {
+      stopScan();
+      hooks.go("#/p/" + ref.payload);
+      return true;
+    }
+    var id = parseCardRef(text);
+    if (!id) return false;
     stopScan();
     hooks.go("card/" + encodeURIComponent(id));
+    return true;
+  }
+
+  function onScanText(text) {
+    if (openScannedRef(text)) return;
+    hooks.showToast("לא זיהינו כרטיס שחקן בקוד. נסו שוב או הדביקו קישור.");
   }
 
   function tickDetect() {
@@ -270,13 +311,8 @@
 
   function submitManual() {
     var input = $("scan-manual");
-    var id = parseCardRef(input && input.value);
-    if (!id) {
-      hooks.showToast("הדביקו קישור לכרטיס, או הקלידו את מזהה הכרטיס.");
-      return;
-    }
-    stopScan();
-    hooks.go("card/" + encodeURIComponent(id));
+    if (openScannedRef(input && input.value)) return;
+    hooks.showToast("הדביקו קישור לכרטיס, או הקלידו את מזהה הכרטיס.");
   }
 
   function paintBar(info) {

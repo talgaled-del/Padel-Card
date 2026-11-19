@@ -14,9 +14,23 @@ services:
       - path: /index.html
         name: Cache-Control
         value: no-cache, no-store, must-revalidate
-      - path: /v27/*
+      - path: /v28/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
+    routes:
+      # Path-based share links (WhatsApp strips or encodes '#'). Real files still win.
+      - type: rewrite
+        source: /c/*
+        destination: /index.html
+      - type: rewrite
+        source: /k/*
+        destination: /index.html
+      - type: rewrite
+        source: /card/*
+        destination: /index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
 
   # AI Rating backend (server/). Free plan sleeps after ~15 min idle; first call can take ~30-60s to wake.
   - type: web

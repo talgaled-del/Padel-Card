@@ -2594,3 +2594,15 @@ button.coach-tile, .req-rater.coach-tile {
 .courtside-bar { flex-direction: column; align-items: stretch; gap: 8px; }
 #scan-card-btn { width: 100%; }
 #show-card-btn { width: 100%; }
+
+.guest-share-cta {
+  margin: 18px 0 8px;
+  text-align: center;
+}
+.guest-share-cta .text-btn {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+.guest-share-cta .text-btn:hover { color: var(--text); }

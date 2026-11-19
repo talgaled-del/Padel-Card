@@ -61,7 +61,11 @@
     disabledCardIds: null,
     disabledLoaded: false,
     adminPreview: false,
-    adminViewUserId: null
+    adminViewUserId: null,
+    shortCode: null,
+    publicShortCode: null,
+    shareCode: null,
+    coachShareCode: null
   };
 
   const $ = function (id) { return document.getElementById(id); };
@@ -207,6 +211,7 @@
     state.partnerId = null;
     state.quizIndex = 0;
     state.cloudSynced = false;
+    state.shortCode = null;
     state.suppressPersist = false;
   }
 
@@ -265,6 +270,8 @@
         showToast(upsertErrorIsForeignCard(res.error)
           ? "הכרטיס הזה כבר שייך לחשבון אחר, ולכן לא נשמר כאן."
           : "השמירה לענן נכשלה. הכרטיס נשמר במכשיר.");
+      } else {
+        refreshMyShortCode();
       }
       return res;
     }).catch(function (err) {
@@ -279,17 +286,17 @@
     var client = getAuthClient();
     var userId = state.auth && state.auth.userId;
     if (!client || !userId) return Promise.resolve(null);
-    return client.from("cards").select("card, updated_at").eq("user_id", userId).maybeSingle()
+    return client.from("cards").select("card, updated_at, short_code").eq("user_id", userId).maybeSingle()
       .then(function (res) {
         if (res && res.error) {
           console.warn("cloud fetch", res.error);
-          return { error: res.error, card: null };
+          return { error: res.error, card: null, short_code: null };
         }
         var row = res && res.data;
-        return { error: null, card: row && row.card ? row.card : null };
+        return { error: null, card: row && row.card ? row.card : null, short_code: (row && row.short_code) || null };
       }).catch(function (err) {
         console.warn("cloud fetch", err);
-        return { error: err, card: null };
+        return { error: err, card: null, short_code: null };
       });
   }
 
@@ -330,12 +337,14 @@
         return;
       }
       var cloud = res && res.card;
+      if (res && res.short_code) state.shortCode = res.short_code;
       if (cloud && hasCardPayload(cloud)) {
         if (local && hasCardPayload(local) && payloadsDiffer(local, cloud)) {
           writeLocalPayload(local, BACKUP_KEY);
         }
         applyPayload(cloud);
         writeLocalPayload(payloadFromState(), STORAGE_KEY);
+        if (!state.shortCode) refreshMyShortCode();
       } else if (local && hasCardPayload(local)) {
         applyPayload(local);
         return upsertCloudCard(payloadFromState());
@@ -687,8 +696,50 @@
   }
 
   function parseRoute() {
+    if (window.PadelShare && PadelShare.absorbEncodedHash) PadelShare.absorbEncodedHash();
+    var inbound = window.PadelShare && PadelShare.parseLocation ? PadelShare.parseLocation() : null;
     var hash = (location.hash || "#/").replace(/^#/, "");
     var parts = hash.split("/").filter(Boolean);
+
+    // Public share paths/query must win before any auth or onboarding guard.
+    if (inbound && inbound.kind && parts[0] !== "admin") {
+      state.adminPreview = false;
+      state.adminViewUserId = null;
+      state.adminPreviewId = null;
+      state.publicPair = null;
+      if (inbound.kind === "coach-code") {
+        if (state.coachShareCode !== inbound.code) state.coachId = null;
+        state.coachShareCode = inbound.code;
+        state.shareCode = inbound.code;
+        state.sharedCardId = null;
+        state.view = "coach";
+        return;
+      }
+      if (inbound.kind === "card-code") {
+        if (state.shareCode !== inbound.code) {
+          state.publicCard = null;
+          state.courtside = null;
+          state.sharedReady = null;
+          state.sharedCardId = null;
+        }
+        state.shareCode = inbound.code;
+        state.coachShareCode = null;
+        state.view = "card";
+        return;
+      }
+      if (inbound.kind === "card-id") {
+        if (state.sharedCardId !== inbound.id) {
+          state.publicCard = null;
+          state.courtside = null;
+          state.sharedReady = null;
+        }
+        state.sharedCardId = inbound.id;
+        state.shareCode = null;
+        state.coachShareCode = null;
+        state.view = "card";
+        return;
+      }
+    }
 
     if (parts[0] === "admin") {
       if (parts[1] === "view" && parts[2]) {
@@ -797,10 +848,15 @@
         state.sharedReady = null;
       }
       state.sharedCardId = sid;
+      state.shareCode = state.shareCode || null;
       state.view = "card";
       return;
     }
-    state.sharedCardId = null;
+    if (!(inbound && (inbound.kind === "card-code" || inbound.kind === "card-id"))) {
+      state.sharedCardId = null;
+      state.shareCode = null;
+    }
+    if (!(inbound && inbound.kind === "coach-code")) state.coachShareCode = null;
 
     if (parts[0] === "scan") {
       state.view = "scan";
@@ -854,14 +910,23 @@
     gateOwnerViews();
   }
 
+  function isPublicShareView() {
+    if (state.shareCode || state.sharedCardId || state.coachShareCode) return true;
+    if (state.publicCard || state.publicPair) return true;
+    if (window.PadelShare && PadelShare.isPublicShareLocation && PadelShare.isPublicShareLocation()) return true;
+    var h = (location.hash || "").replace(/^#\/?/, "");
+    if (h.indexOf("card/") === 0 || h.indexOf("p/") === 0 || h.indexOf("pair/") === 0 || h.indexOf("coach/") === 0) return true;
+    return false;
+  }
+
   function isVisitorView() {
-    return !!(state.publicCard || state.publicPair);
+    return isPublicShareView();
   }
 
   function gateOwnerViews() {
-    if (isVisitorView()) return;
+    if (isPublicShareView()) return;
     if (state.view === "legal") return;
-    if (state.view === "card" && state.sharedCardId) return;
+    if (state.view === "card" && (state.sharedCardId || state.shareCode)) return;
     if (state.view === "scan") {
       if (!state.authReady) { state.view = "boot"; return; }
       if (!isLoggedIn()) { state.view = "login"; return; }
@@ -897,7 +962,9 @@
 
   function applyShareAvailability() {
     if (!state.disabledLoaded) {
-      state.view = "boot";
+      // Do not send a public share (WhatsApp / incognito) to the boot/login wall
+      // while the disabled-card list is still loading.
+      if (!isPublicShareView()) state.view = "boot";
       return;
     }
     var ids = state.disabledCardIds || {};
@@ -1000,8 +1067,42 @@
     if (view === "home") next = "#/";
     else if (view && view.charAt(0) === "#") next = view;
     else next = "#/" + view;
+    var path = location.pathname || "/";
+    var onSharePath = path !== "/" && path !== "/index.html";
+    if (onSharePath) {
+      var href = "/" + next;
+      try { history.pushState(null, "", href); render(); }
+      catch (err) { location.assign(href); }
+      return;
+    }
     if ((location.hash || "#/") === next) render();
     else location.hash = next;
+  }
+
+  function openSharePath(path) {
+    if (!path) return;
+    try { history.pushState(null, "", path); render(); }
+    catch (err) { location.assign(path); }
+  }
+
+  function refreshMyShortCode() {
+    var c = getAuthClient();
+    if (!c || !isLoggedIn() || state.isCertifiedRater) return Promise.resolve("");
+    return c.rpc("my_card_share_code").then(function (res) {
+      if (res && res.error) return "";
+      if (res && res.data) state.shortCode = res.data;
+      return state.shortCode || "";
+    }).catch(function () { return ""; });
+  }
+
+  function preferredPlayerShareUrl(card) {
+    var code = state.shortCode || state.publicShortCode || state.shareCode || (card && card.short_code) || "";
+    if (code && window.PadelShare) return PadelShare.cardUrl(code);
+    var id = shareCardId(card || state.publicCard || ((state.profile && state.levelId) ? currentCardData() : null));
+    if (id && window.PadelShare && (state.cloudSynced || state.publicCard || state.sharedCardId)) {
+      return PadelShare.cardIdFallbackUrl(id);
+    }
+    return singleShareUrl(card);
   }
 
   function showToast(msg, ms) {
@@ -4073,12 +4174,22 @@
     return !state.publicPair && !!(state.profile && state.levelId && linkedPartner());
   }
 
+  function paintGuestShareCta() {
+    var el = $("guest-share-cta");
+    if (!el) return;
+    var onShare = !!(state.publicCard || state.sharedCardId || state.shareCode);
+    var owns = !!(state.profile && state.levelId && typeof viewerOwnsViewedCard === "function" && viewerOwnsViewedCard());
+    var show = onShare && !isLoggedIn() && !owns && state.view === "card";
+    el.classList.toggle("hidden", !show);
+  }
+
   function renderCard() {
     var data = state.publicCard ? state.publicCard : currentCardData();
     var owns = viewerOwnsViewedCard();
     var local = isLocalLiveCard();
     var partner = local ? linkedPartner() : null;
     $("owner-actions").classList.toggle("hidden", !owns);
+    paintGuestShareCta();
     if ($("req-ask-bar")) $("req-ask-bar").classList.toggle("hidden", !owns || !!state.isCertifiedRater);
     $("copy-own-link").classList.toggle("hidden", !owns);
     setWhatsAppShare($("wa-share-own"), owns, owns ? urlToCopyForCard() : "", "single");
@@ -4181,9 +4292,9 @@
   }
 
   function urlToCopyForCard() {
-    if (state.profile && state.levelId && viewerOwnsViewedCard()) return singleShareUrl();
-    if (state.publicCard) return currentPageUrl();
-    return singleShareUrl();
+    if (state.profile && state.levelId && viewerOwnsViewedCard()) return preferredPlayerShareUrl(currentCardData());
+    if (state.publicCard) return preferredPlayerShareUrl(state.publicCard) || currentPageUrl();
+    return preferredPlayerShareUrl();
   }
 
   function urlToCopyForPair() {
@@ -4401,44 +4512,125 @@
   }
 
   var sharedFetch = 0;
+  function shareLoadErrorMessage(err) {
+    var msg = (err && (err.message || err.error_description || err.details)) || "";
+    var low = String(msg).toLowerCase();
+    if (/card unavailable/.test(low)) return "הכרטיס אינו זמין.";
+    if (/code not found|card not found|invalid code|invalid card/.test(low)) return "כרטיס השחקן לא נמצא.";
+    if (window.PadelCourtside && PadelCourtside.hebrewError) return PadelCourtside.hebrewError(err);
+    return "כרטיס השחקן לא נמצא.";
+  }
+
+  function showSharedCardFailure(err) {
+    var msg = shareLoadErrorMessage(err);
+    showToast(msg);
+    var root = $("card-root");
+    if (root) root.innerHTML = '<p class="lede">' + msg + "</p>";
+    if (/אינו זמין/.test(msg) && $("view-unavailable")) {
+      state.view = "unavailable";
+      if ($("view-card")) $("view-card").classList.add("hidden");
+      $("view-unavailable").classList.remove("hidden");
+    }
+  }
+
+  function applyResolvedShare(data, readyKey) {
+    var card = data && data.card;
+    if (!card) throw new Error("card not found");
+    state.publicCard = card;
+    state.sharedReady = readyKey;
+    state.publicShortCode = data.short_code || state.publicShortCode || null;
+    if (data.card_id) state.sharedCardId = data.card_id;
+    state.courtside = state.isCertifiedRater ? data : null;
+    renderCard();
+    applyShareAvailability();
+    paintGuestShareCta();
+    if (window.PadelCourtside) PadelCourtside.paintBar(state.courtside);
+  }
+
   function loadSharedCard(id) {
-    if (!id) return;
-    if (state.publicCard && shareCardId(state.publicCard) === id && state.sharedReady === id) {
+    var code = state.shareCode || "";
+    if (!id && !code) return;
+    var readyKey = code || id;
+    if (state.publicCard && state.sharedReady === readyKey) {
       renderCard();
+      paintGuestShareCta();
       if (window.PadelCourtside && state.courtside) PadelCourtside.paintBar(state.courtside);
       return;
     }
     var root = $("card-root");
     if (root && !state.publicCard) root.innerHTML = '<p class="lede">טוענים את כרטיס השחקן…</p>';
+
+    function run(c) {
+      if (!c) {
+        showSharedCardFailure({ message: "card not found" });
+        return;
+      }
+      var seq = ++sharedFetch;
+      var req;
+      if (code) req = c.rpc("resolve_share_code", { p_code: code });
+      else if (state.isCertifiedRater) req = c.rpc("get_card_for_courtside", { p_card_id: id });
+      else req = c.rpc("get_shared_card", { p_card_id: id });
+      req.then(function (res) {
+        if (seq !== sharedFetch) return;
+        if (res.error) throw res.error;
+        var data = res.data || {};
+        if (code && data.kind === "coach") {
+          state.coachShareCode = code;
+          state.coachId = data.coach_id;
+          state.shareCode = null;
+          state.view = "coach";
+          try { history.replaceState(null, "", "/k/" + code); } catch (err) {}
+          if (window.PadelCoaches) PadelCoaches.loadCoach(state.coachId);
+          return;
+        }
+        applyResolvedShare(data, readyKey);
+      }).catch(function (err) {
+        if (seq !== sharedFetch) return;
+        state.publicCard = null;
+        state.courtside = null;
+        state.sharedReady = null;
+        showSharedCardFailure(err);
+      });
+    }
+
+    var client = getAuthClient();
+    if (client) { run(client); return; }
+    setTimeout(function () {
+      var retry = getAuthClient();
+      if (retry) run(retry);
+      else showSharedCardFailure({ message: "card not found" });
+    }, 120);
+  }
+
+  function resolveCoachShare() {
+    var code = state.coachShareCode;
+    if (!code) return;
     var c = getAuthClient();
     if (!c) {
-      showToast("לא ניתן לטעון את הכרטיס");
+      setTimeout(function () {
+        if (getAuthClient()) resolveCoachShare();
+      }, 120);
       return;
     }
-    var seq = ++sharedFetch;
-    var req = state.isCertifiedRater
-      ? c.rpc("get_card_for_courtside", { p_card_id: id })
-      : c.rpc("get_shared_card", { p_card_id: id });
-    req.then(function (res) {
-      if (seq !== sharedFetch) return;
+    c.rpc("resolve_share_code", { p_code: code }).then(function (res) {
       if (res.error) throw res.error;
       var data = res.data || {};
-      var card = data.card || null;
-      if (!card) throw new Error("card not found");
-      state.publicCard = card;
-      state.sharedReady = id;
-      state.courtside = state.isCertifiedRater ? data : null;
-      renderCard();
-      applyShareAvailability();
-      if (window.PadelCourtside) PadelCourtside.paintBar(state.courtside);
+      if (data.kind === "card") {
+        state.shareCode = code;
+        state.coachShareCode = null;
+        state.view = "card";
+        try { history.replaceState(null, "", "/c/" + code); } catch (err) {}
+        loadSharedCard();
+        return;
+      }
+      if (!data.coach_id) throw new Error("code not found");
+      state.coachId = data.coach_id;
+      if (window.PadelCoaches) PadelCoaches.loadCoach(state.coachId);
     }).catch(function (err) {
-      if (seq !== sharedFetch) return;
-      state.publicCard = null;
-      state.courtside = null;
-      state.sharedReady = null;
-      var msg = (window.PadelCourtside && PadelCourtside.hebrewError(err)) || "כרטיס השחקן לא נמצא";
+      var box = $("coach-card-root");
+      var msg = shareLoadErrorMessage(err);
       showToast(msg);
-      if (root) root.innerHTML = '<p class="lede">' + msg + "</p>";
+      if (box) box.innerHTML = '<p class="lede">' + msg + "</p>";
     });
   }
 
@@ -4461,15 +4653,19 @@
     if (state.view === "rate") openRateRequest();
     if (state.view === "card" || state.view === "admin-view") {
       if (state.view === "admin-view") openAdminCardPreview();
-      else if (state.sharedCardId) loadSharedCard(state.sharedCardId);
+      else if (state.shareCode || state.sharedCardId) loadSharedCard(state.sharedCardId);
       else renderCard();
     }
+    paintGuestShareCta();
     if (state.view === "pair") renderPair();
     if (state.view === "share") renderShare();
     if (state.view === "admin" && window.PadelAdmin && PadelAdmin.render) PadelAdmin.render();
     if (state.view === "legal" && window.PadelLegal && PadelLegal.renderPage) PadelLegal.renderPage();
     if (state.view === "coaches" && window.PadelCoaches) PadelCoaches.loadDirectory();
-    if (state.view === "coach" && window.PadelCoaches) PadelCoaches.loadCoach(state.coachId);
+    if (state.view === "coach" && window.PadelCoaches) {
+      if (state.coachShareCode && !state.coachId) resolveCoachShare();
+      else PadelCoaches.loadCoach(state.coachId);
+    }
     if (state.view === "coach-profile" && window.PadelCoaches) PadelCoaches.loadEditor();
     if (state.view === "invite" && window.PadelCoaches) PadelCoaches.renderInvite();
     if (state.view === "scan" && window.PadelCourtside) PadelCourtside.openScan();
@@ -4508,6 +4704,10 @@
     if ($("show-card-btn")) $("show-card-btn").addEventListener("click", function () {
       var data = state.publicCard ? state.publicCard : currentCardData();
       if (window.PadelCourtside) PadelCourtside.openShow(data);
+    });
+    if ($("guest-share-cta-btn")) $("guest-share-cta-btn").addEventListener("click", function (ev) {
+      ev.preventDefault();
+      go("login");
     });
     if ($("scan-card-btn")) $("scan-card-btn").addEventListener("click", function () { go("scan"); });
     if ($("home-coaches-btn")) $("home-coaches-btn").addEventListener("click", function () { go("coaches"); });
@@ -4709,6 +4909,7 @@
     window.addEventListener("orientationchange", onViewport);
     if (window.visualViewport) window.visualViewport.addEventListener("resize", onViewport);
     window.addEventListener("hashchange", render);
+    window.addEventListener("popstate", render);
     document.addEventListener("click", function (ev) {
       var info = ev.target && ev.target.closest && ev.target.closest(".ut-weight-info");
       if (info) {
@@ -4778,6 +4979,7 @@
           var afterLegal = function () {
             state.authReady = true;
             if (window.PadelAuth && PadelAuth.render) PadelAuth.render();
+            if (isPublicShareView()) { render(); return; }
             var hash = (location.hash || "").replace(/^#\/?/, "");
             var wantsAdmin = hash.indexOf("admin") === 0;
             var onLegal = hash === "terms" || hash === "privacy" || hash === "copyright";
@@ -4929,9 +5131,11 @@
     PadelCourtside.init({
       showToast: showToast,
       go: go,
+      openSharePath: openSharePath,
       isRater: function () { return !!state.isCertifiedRater; },
       isLoggedIn: isLoggedIn,
       cardId: shareCardId,
+      shareCode: function (card) { return state.shortCode || state.publicShortCode || (card && card.short_code) || state.shareCode || ""; },
       getClient: getAuthClient,
       initials: initials,
       weightedLabel: function (card) {
